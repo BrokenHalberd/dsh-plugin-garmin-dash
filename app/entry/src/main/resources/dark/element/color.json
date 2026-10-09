@@ -1,0 +1,30 @@
+{
+  "color": [
+    { "name": "start_window_background", "value": "#FF0B0E14" },
+    { "name": "background", "value": "#FF0B0E14" },
+    { "name": "gradient_start", "value": "#FF111A2B" },
+    { "name": "gradient_mid", "value": "#FF0E131C" },
+    { "name": "gradient_end", "value": "#FF0C1A18" },
+    { "name": "card_background_blur", "value": "#26FFFFFF" },
+    { "name": "card_border_highlight", "value": "#33FFFFFF" },
+    { "name": "tab_background_blur", "value": "#B30B0E14" },
+    { "name": "text_primary", "value": "#E6FDFDFD" },
+    { "name": "text_secondary", "value": "#B3FFFFFF" },
+    { "name": "text_tertiary", "value": "#80FFFFFF" },
+    { "name": "text_hint", "value": "#66FFFFFF" },
+    { "name": "accent", "value": "#FF7FA8FF" },
+    { "name": "accent_soft", "value": "#331F3A6E" },
+    { "name": "accent_on", "value": "#FF0B1220" },
+    { "name": "danger", "value": "#FFFF8A80" },
+    { "name": "success", "value": "#FF81C995" },
+    { "name": "chip_background", "value": "#26FFFFFF" },
+    { "name": "divider", "value": "#1AFFFFFF" },
+    { "name": "shadow", "value": "#66000000" },
+    { "name": "banner_background", "value": "#3D3320" },
+    { "name": "banner_text", "value": "#FFF2D08A" },
+    { "name": "sleep_deep", "value": "#FF5C7BC4" },
+    { "name": "sleep_light", "value": "#FF7FA8E8" },
+    { "name": "sleep_rem", "value": "#FFB48CE8" },
+    { "name": "sleep_awake", "value": "#FFE0A24C" }
+  ]
+}

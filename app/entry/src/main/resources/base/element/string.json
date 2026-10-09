@@ -1,0 +1,8 @@
+{
+  "string": [
+    { "name": "module_desc", "value": "Garmin 数据仪表盘" },
+    { "name": "EntryAbility_desc", "value": "佳明仪表盘" },
+    { "name": "EntryAbility_label", "value": "佳明仪表盘" },
+    { "name": "permission_reason_motion", "value": "用于识别左右手握持，把对话按钮放到拇指方便按的一侧" }
+  ]
+}

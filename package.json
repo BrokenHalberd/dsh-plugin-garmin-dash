@@ -1,0 +1,62 @@
+{
+  "name": "dsh-plugin-garmin-dash",
+  "version": "0.2.0",
+  "private": true,
+  "description": "佳明仪表盘：把 Garmin Connect 数据暴露成手机 App 接口，并内置部署引导页 / 配对二维码 / App 产物分发（鸿蒙原生 App 配套后端）",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "dash-mint-pair-code": "bin/mint-pair-code.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "lib",
+    "bin",
+    "assets",
+    "app",
+    "cordis.patch.yml",
+    "PUBLISH.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "deepseek",
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "garmin",
+    "garmin-connect",
+    "fitness",
+    "health",
+    "harmonyos",
+    "workout",
+    "running",
+    "cycling"
+  ],
+  "scripts": {
+    "test": "node test/run-all.mjs"
+  },
+  "license": "MIT",
+  "author": "BrokenHalberd",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BrokenHalberd/dsh-plugin-garmin-dash.git"
+  },
+  "homepage": "https://github.com/BrokenHalberd/dsh-plugin-garmin-dash#readme",
+  "bugs": {
+    "url": "https://github.com/BrokenHalberd/dsh-plugin-garmin-dash/issues"
+  }
+}

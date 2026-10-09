@@ -1,0 +1,59 @@
+{
+  "module": {
+    "name": "entry",
+    "type": "entry",
+    "description": "$string:module_desc",
+    "mainElement": "EntryAbility",
+    "deviceTypes": [
+      "phone",
+      "tablet",
+      "2in1"
+    ],
+    "deliveryWithInstall": true,
+    "installationFree": false,
+    "pages": "$profile:main_pages",
+    "abilities": [
+      {
+        "name": "EntryAbility",
+        "srcEntry": "./ets/entryability/EntryAbility.ets",
+        "description": "$string:EntryAbility_desc",
+        "icon": "$media:layered_image",
+        "label": "$string:EntryAbility_label",
+        "startWindowIcon": "$media:startIcon",
+        "startWindowBackground": "$color:start_window_background",
+        "exported": true,
+        "skills": [
+          {
+            "entities": ["entity.system.home"],
+            "actions": ["action.system.home"]
+          }
+        ]
+      }
+    ],
+      "requestPermissions": [
+        {
+          "name": "ohos.permission.INTERNET"
+        },
+        {
+          "name": "ohos.permission.GET_NETWORK_INFO"
+        },
+        {
+          // 智感握持：识别左右手，把 DSH 对话按钮放到拇指够得到的一侧
+          "name": "ohos.permission.ACTIVITY_MOTION",
+          "reason": "$string:permission_reason_motion",
+          "usedScene": {
+            "abilities": ["EntryAbility"],
+            "when": "inuse"
+          }
+        },
+        {
+          "name": "ohos.permission.DETECT_GESTURE",
+          "reason": "$string:permission_reason_motion",
+          "usedScene": {
+            "abilities": ["EntryAbility"],
+            "when": "inuse"
+          }
+        }
+      ]
+  }
+}

@@ -1,0 +1,11 @@
+# 本 bundle 的补丁层：把 garmin-dash 后端挂到 profile 的 entry 树上。
+#
+# 与 dsh-plugin-garmin-connect/cordis.patch.yml 同形（`- insert:` + id/name），
+# 由 dsh-app-boot 的 profile 组合器按 dsh.profile.bundles 的顺序逐个应用。
+#
+# 依赖关系（不在本文件里也能工作，但显式声明更安全）：
+#   - webServer：@deepseek-ai/dsh-host-webserver，注册 HTTP 路由用
+#   - loader   ：@deepseek-ai/cordis-plugin-loader，读取 garmin-connect 的账号配置
+- insert:
+    - id: garmin-dash
+      name: 'dsh-plugin-garmin-dash'

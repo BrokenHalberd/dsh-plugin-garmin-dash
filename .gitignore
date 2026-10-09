@@ -1,0 +1,9 @@
+node_modules/
+*.tgz
+*.log
+state/
+build/
+.hvigor/
+oh_modules/
+.idea/
+.DS_Store
