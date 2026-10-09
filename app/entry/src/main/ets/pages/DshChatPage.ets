@@ -20,7 +20,7 @@ const QUICK_PROMPTS: string[] = [
  * App 内建聊天（原生界面，非 WebView）。
  *
  * 重要约束（后端硬保证，App 侧无任何入口可改）：
- *   · 工作区固定 <数据目录> —— 会话的 cwd 在后端启动进程时钉死，创建后不可变
+ *   · 工作区固定 E:\GarminData —— 会话的 cwd 在后端启动进程时钉死，创建后不可变
  *   · 权限档固定 workspace-write —— headless profile 的 defaultPreset + 后端环境变量双保险
  * 会话是**持久会话**：每条消息只起一个短进程，但用同一个 session id 续接，
  * 因此拥有完整会话记忆，App/电脑重启后依旧连续。
@@ -40,6 +40,34 @@ struct DshChatPage {
   @StorageProp('bottomRectHeight') bottomInset: number = 0;
   aboutToAppear(): void {
     this.sessionId = DeviceStore.getChatSession();
+    this.restoreLog();
+  }
+
+  /** 恢复上次的对话（界面历史；模型侧记忆由 sessionId 保证） */
+  private restoreLog(): void {
+    const raw = DeviceStore.getChatLog();
+    if (raw.length < 3) {
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw) as ChatMsg[];
+      if (parsed !== null && parsed.length > 0) {
+        this.msgs = parsed;
+        setTimeout(() => {
+          this.scrollBottom();
+        }, 60);
+      }
+    } catch (e) {
+      // 记录损坏：清掉，避免每次打开都报错
+      DeviceStore.setChatLog('[]');
+    }
+  }
+
+  /** 落盘（只留最近 200 条，避免 preferences 无限增长） */
+  private persistLog(): void {
+    const all = this.msgs;
+    const keep = all.length > 200 ? all.slice(all.length - 200) : all;
+    DeviceStore.setChatLog(JSON.stringify(keep));
   }
   private scrollBottom(): void {
     try {
@@ -55,6 +83,7 @@ struct DshChatPage {
     }
     const mine: ChatMsg = { role: 'user', text: text, tools: '' };
     this.msgs = this.msgs.concat([mine]);
+    this.persistLog();
     this.input = '';
     this.sending = true;
     this.err = '';
@@ -68,6 +97,7 @@ struct DshChatPage {
         const tools: string = r.tools === undefined || r.tools === null ? '' : r.tools.join(' · ');
         const reply: ChatMsg = { role: 'assistant', text: r.reply, tools: tools };
         this.msgs = this.msgs.concat([reply]);
+        this.persistLog();
         this.sending = false;
         this.scrollBottom();
       })
@@ -78,6 +108,7 @@ struct DshChatPage {
   }
   private newSession(): void {
     DeviceStore.clearChatSession();
+    DeviceStore.setChatLog('[]');
     this.sessionId = '';
     this.msgs = [];
     this.err = '';

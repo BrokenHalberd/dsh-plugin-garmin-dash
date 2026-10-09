@@ -115,4 +115,16 @@ export class DeviceStore {
     s.putSync('handFollow', on);
     s.flush();
   }
+  // ── 聊天界面历史（本地持久化，最多 200 条）──
+  // 说明：模型侧的会话记忆由 sessionId 保证（后端持久会话）；这里保存的是
+  // **界面要显示的历史**，两者独立，互不依赖 DSH 的内部存储格式。
+  static getChatLog(): string {
+    return DeviceStore.ensure().getSync('chatLog', '[]') as string;
+  }
+
+  static setChatLog(json: string): void {
+    const s = DeviceStore.ensure();
+    s.putSync('chatLog', json);
+    s.flush();
+  }
 }
