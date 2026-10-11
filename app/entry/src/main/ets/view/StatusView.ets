@@ -454,6 +454,26 @@ export struct StatusView {
     return Math.round(((hi - b2) / span) * 100) + '%';
   }
 
+  /** 身体电量卡：必须是无参 @Builder —— 按值传参的 builder 不会随状态刷新 */
+  @Builder
+  bbCard() {
+    Column() {
+      Text('Body Battery').fontSize(11).fontColor($r('app.color.text_tertiary'))
+      Row() {
+        Text(this.bbText()).fontSize(26).fontWeight(FontWeight.Bold).fontColor($r('app.color.accent'))
+        Text(' 最高').fontSize(10).fontColor($r('app.color.text_tertiary')).margin({ bottom: 4 })
+      }
+      .alignItems(VerticalAlign.Bottom)
+      Text(this.bbSubText()).fontSize(9).fontColor($r('app.color.text_hint'))
+    }
+    .alignItems(HorizontalAlign.Start)
+    .layoutWeight(1)
+    .padding(12)
+    .backgroundColor($r('app.color.card_background_blur'))
+    .border({ width: 1, color: $r('app.color.card_border_highlight') })
+    .borderRadius(12)
+  }
+
   @Builder
   hrvCard() {
     Column() {
@@ -788,7 +808,7 @@ export struct StatusView {
               this.card({ title: '步数', value: this.stepsText(), unit: '步', sub: '' })
               this.card({ title: '静息心率', value: this.rhrText(), unit: 'bpm', sub: '' })
               this.card({ title: '睡眠', value: this.sleepText(), unit: '', sub: this.sleepScoreText() })
-              this.card({ title: 'Body Battery', value: this.bbText(), unit: '', sub: this.bbSubText() })
+              this.bbCard()
             }
             .width('100%')
 
