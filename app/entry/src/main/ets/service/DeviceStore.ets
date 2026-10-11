@@ -127,4 +127,26 @@ export class DeviceStore {
     s.putSync('chatLog', json);
     s.flush();
   }
+  // ── 表现预测器输入（持久化）──
+  static setPredictInputs(distKm: number, climb: number, weight: number, bike: number, cda: number, crr: number, power: number): void {
+    const s = DeviceStore.ensure();
+    s.putSync('predInputs', JSON.stringify({
+      distKm: distKm, climb: climb, weight: weight, bike: bike, cda: cda, crr: crr, power: power
+    }));
+    s.flush();
+  }
+
+  static getPredictInputs(): string {
+    return DeviceStore.ensure().getSync('predInputs', '') as string;
+  }
+  // ── 全局个人设置：体重（kg，字符串保存，空=未设置）──
+  static getBodyWeight(): string {
+    return DeviceStore.ensure().getSync('bodyWeight', '') as string;
+  }
+
+  static setBodyWeight(v: string): void {
+    const s = DeviceStore.ensure();
+    s.putSync('bodyWeight', v);
+    s.flush();
+  }
 }

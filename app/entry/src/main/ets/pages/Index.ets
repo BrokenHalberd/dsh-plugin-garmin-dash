@@ -23,6 +23,9 @@ import { MeView } from '../view/MeView';
 const HAND_DEBOUNCE_MS: number = 1500;
 const HAND_HIDE_MS: number = 500;
 
+/** 底部选项栏 + 安全区：滚到底时避开遮挡 */
+const BOTTOM_BAR_PAD: number = 104;
+
 @Entry
 @Component
 struct Index {
@@ -209,22 +212,38 @@ struct Index {
     Stack({ alignContent: Alignment.Bottom }) {
       Tabs({ barPosition: BarPosition.End, index: this.currentTab, controller: this.controller }) {
         TabContent() {
-          StatusView({ tick: this.tick })
+          Column() {
+            StatusView({ tick: this.tick })
+          }
+          .width('100%').height('100%')
+          .padding({ bottom: BOTTOM_BAR_PAD })
         }
         .tabBar('')
 
         TabContent() {
-          ActivitiesView({ tick: this.tick })
+          Column() {
+            ActivitiesView({ tick: this.tick })
+          }
+          .width('100%').height('100%')
+          .padding({ bottom: BOTTOM_BAR_PAD })
         }
         .tabBar('')
 
         TabContent() {
-          TrendView({ tick: this.tick })
+          Column() {
+            TrendView({ tick: this.tick })
+          }
+          .width('100%').height('100%')
+          .padding({ bottom: BOTTOM_BAR_PAD })
         }
         .tabBar('')
 
         TabContent() {
-          MeView({ onChanged: () => { this.tick = this.tick + 1; } })
+          Column() {
+            MeView({ onChanged: () => { this.tick = this.tick + 1; } })
+          }
+          .width('100%').height('100%')
+          .padding({ bottom: BOTTOM_BAR_PAD })
         }
         .tabBar('')
       }

@@ -1,7 +1,7 @@
 import { router } from '@kit.ArkUI';
 import { ApiClient } from '../service/ApiClient';
 import { DeviceStore } from '../service/DeviceStore';
-import { ActivityDetail } from '../model/Types';
+import { Activity, ActivityDetail } from '../model/Types';
 import { Fmt } from '../util/Format';
 import { Theme } from '../util/Theme';
 import { common } from '@kit.AbilityKit';
@@ -34,6 +34,16 @@ interface DetailFull extends ActivityDetail {
   hrTimeInZone_3?: number;
   hrTimeInZone_4?: number;
   hrTimeInZone_5?: number;
+  normPower: number | null;
+  avgPower: number | null;
+  trainingStressScore: number | null;
+  durationSeconds: number | null;
+}
+/** 近 90 天最佳曲线（按本页曲线顺序点数） */
+interface CurveBest {
+  pts: number[];
+  count: number;
+  eftp: number | null;
 }
 @Entry
 @Component
@@ -44,13 +54,33 @@ struct ActivityDetailPage {
   /** 系统深浅色：Canvas 取色用 */
   @State dark: boolean = false;
   @State staleNote: string = '';
+  // ── 曲线对比与派生指标（Intervals.icu 风格）──
+  @State bestCurve: number[] = [];
+  @State cmpCount: number = 0;
+  @State cmpLoading: boolean = false;
+  @State cmpErr: string = '';
+  @State cmpReady: boolean = false;
+  @State eftpBest: number | null = null;
+  private cmpSettings: RenderingContextSettings = new RenderingContextSettings(true);
+  private cmpCtx: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.cmpSettings);
   @StorageProp('topRectHeight') topInset: number = 0;
   @StorageProp('bottomRectHeight') bottomInset: number = 0;
   private activityId: number = 0;
+
+  /** 系统字体缩放（无障碍字号） */
+  private fontScale: number = 1;
+
   private settings: RenderingContextSettings = new RenderingContextSettings(true);
   private ctx: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.settings);
   aboutToAppear(): void {
     this.dark = Theme.isDark(getContext(this) as common.UIAbilityContext);
+    // 跟随系统字体缩放（无障碍字号）：Canvas 文字不会自动继承，需手动读取
+    try {
+      const cfg = (getContext(this) as common.UIAbilityContext).config;
+      this.fontScale = cfg.fontSizeScale !== undefined && cfg.fontSizeScale > 0 ? cfg.fontSizeScale : 1;
+    } catch (e) {
+      this.fontScale = 1;
+    }
     const params = router.getParams() as Record<string, number>;
     if (params !== null && params !== undefined) {
       this.activityId = params.id as number;
@@ -129,10 +159,10 @@ struct ActivityDetailPage {
     }
     const w = this.ctx.width;
     const h = this.ctx.height;
-    const padL = 34;
+    const padL = Math.round(this.labelSize(w) * 2.6) + 4;
     const padR = 8;
-    const padT = 10;
-    const padB = 20;
+    const padT = 12;
+    const padB = this.labelSize(w) + 12;
     const plotW = w - padL - padR;
     const plotH = h - padT - padB;
     this.ctx.clearRect(0, 0, w, h);
@@ -149,7 +179,7 @@ struct ActivityDetailPage {
     const xOf = (sec: number): number => padL + ((Math.log(sec) - logMin) / (logMax - logMin)) * plotW;
     const yOf = (v: number): number => padT + plotH - (v / max) * plotH;
     // 网格 + y 刻度
-    this.ctx.font = '9px sans-serif';
+    this.ctx.font = this.labelSize(this.ctx.width) + 'px sans-serif';
     for (let g = 0; g <= 4; g++) {
       const v = (max * g) / 4;
       const y = yOf(v);
@@ -277,6 +307,228 @@ struct ActivityDetailPage {
     }
     return d.maxAvgPower_60 !== undefined && d.maxAvgPower_60 !== null;
   }
+// ── 派生指标（全部由现有详情数据现算）──
+
+  /** 本次骑行的 20 分钟最佳功率推算 eFTP（单次只能给出下限） */
+  private eftpFromRide(): number | null {
+    const d = this.detail;
+    if (d === null) return null;
+    const v = d.maxAvgPower_1200;
+    if (v === undefined || v === null || v <= 0) return null;
+    return Math.round(v * 0.95);
+  }
+
+  /** 变异性指数 VI = NP / 平均功率（越接近 1 越平稳） */
+  private vi(): number | null {
+    const d = this.detail;
+    if (d === null) return null;
+    const np = d.normPower;
+    const ap = d.avgPower;
+    if (np === undefined || np === null || ap === undefined || ap === null || ap <= 0) return null;
+    return Math.round((np / ap) * 100) / 100;
+  }
+
+  /** 训练密度 TSS/小时 */
+  private tssPerHour(): number | null {
+    const d = this.detail;
+    if (d === null) return null;
+    const tss = d.trainingStressScore;
+    const sec = d.durationSeconds;
+    if (tss === undefined || tss === null || sec === undefined || sec === null || sec <= 600) return null;
+    return Math.round(tss / (sec / 3600));
+  }
+
+  /** 任意详情对象的曲线取值（键名形如 maxAvgPower_<秒>） */
+  private curveValueOf(d: DetailFull, sec: number): number {
+    let v: number | undefined;
+    if (sec === 1) v = d.maxAvgPower_1;
+    else if (sec === 2) v = d.maxAvgPower_2;
+    else if (sec === 5) v = d.maxAvgPower_5;
+    else if (sec === 10) v = d.maxAvgPower_10;
+    else if (sec === 20) v = d.maxAvgPower_20;
+    else if (sec === 30) v = d.maxAvgPower_30;
+    else if (sec === 60) v = d.maxAvgPower_60;
+    else if (sec === 120) v = d.maxAvgPower_120;
+    else if (sec === 300) v = d.maxAvgPower_300;
+    else if (sec === 600) v = d.maxAvgPower_600;
+    else if (sec === 1200) v = d.maxAvgPower_1200;
+    else if (sec === 1800) v = d.maxAvgPower_1800;
+    else if (sec === 3600) v = d.maxAvgPower_3600;
+    else if (sec === 7200) v = d.maxAvgPower_7200;
+    else if (sec === 18000) v = d.maxAvgPower_18000;
+    return v === undefined || v === null ? 0 : v;
+  }
+
+  /** 由某条曲线推算 eFTP（20 分钟 × 0.95） */
+  private eftpOf(pts: number[]): number | null {
+    const secs = this.curvePoints();
+    for (let i = 0; i < secs.length; i++) {
+      if (secs[i] === 1200 && i < pts.length && pts[i] > 0) {
+        return Math.round(pts[i] * 0.95);
+      }
+    }
+    return null;
+  }
+
+  /** 应用已缓存的对比结果 */
+  private applyComparison(json: string): void {
+    try {
+      const cb = JSON.parse(json) as CurveBest;
+      if (cb.pts.length > 0) {
+        this.bestCurve = cb.pts;
+        this.cmpCount = cb.count;
+        this.eftpBest = cb.eftp;
+        this.cmpReady = true;
+      }
+    } catch (e) {
+      DeviceStore.cachePut('curveBest:90', '');
+    }
+  }
+
+  /** 载入「近 90 天最佳曲线」（按钮触发；命中缓存则不请求） */
+  private loadComparison(): void {
+    if (this.cmpLoading) return;
+    const key = 'curveBest:90';
+    const cached = DeviceStore.cacheGet(key);
+    if (cached.length > 10 && DeviceStore.cacheAge(key) < 86400000) {
+      this.applyComparison(cached);
+      return;
+    }
+    if (!DeviceStore.isPaired()) { this.cmpErr = '尚未配对'; return; }
+    this.cmpLoading = true;
+    this.cmpErr = '';
+    const secs = this.curvePoints();
+    const cutoff = Fmt.shiftDays(Fmt.today(), -90);
+    ApiClient.getActivities(30, 0)
+      .then((list: Activity[]) => {
+        const picks: number[] = [];
+        for (let i = 0; i < list.length && picks.length < 10; i++) {
+          const a = list[i];
+          const d10 = a.startTime.length >= 10 ? a.startTime.substring(0, 10) : '';
+          if (d10 < cutoff) continue;
+          if (a.normPower === null || a.avgPower === null) continue;
+          picks.push(a.id);
+        }
+        if (picks.length === 0) {
+          this.cmpLoading = false;
+          this.cmpErr = '近 90 天没有带功率的活动';
+          return;
+        }
+        const best: number[] = [];
+        for (let k = 0; k < secs.length; k++) best.push(0);
+        let idx = 0;
+        const step = () => {
+          if (idx >= picks.length) {
+            const payload: CurveBest = { pts: best, count: picks.length, eftp: this.eftpOf(best) };
+            DeviceStore.cachePut(key, JSON.stringify(payload));
+            this.bestCurve = best;
+            this.cmpCount = picks.length;
+            this.eftpBest = payload.eftp;
+            this.cmpReady = true;
+            this.cmpLoading = false;
+            this.drawComparison();
+            return;
+          }
+          const id = picks[idx];
+          idx++;
+          ApiClient.getActivityDetail(id)
+            .then((d: ActivityDetail) => {
+              const full = d as DetailFull;
+              for (let k = 0; k < secs.length; k++) {
+                const v = this.curveValueOf(full, secs[k]);
+                if (v > best[k]) best[k] = v;
+              }
+            })
+            .catch(() => { })
+            .then(() => { step(); });
+        };
+        step();
+      })
+      .catch((e: Object) => {
+        this.cmpLoading = false;
+        this.cmpErr = ApiClient.friendly(e);
+      });
+  }
+
+  /** 画「本次 vs 近 90 天最佳」对比图 */
+  private drawComparison(): void {
+    const d = this.detail;
+    if (d === null || this.bestCurve.length === 0) return;
+    const w = this.cmpCtx.width;
+    const h = this.cmpCtx.height;
+    if (w <= 0 || h <= 0) return;
+    const secs = this.curvePoints();
+    const mine: number[] = [];
+    let max = 10;
+    for (let i = 0; i < secs.length; i++) {
+      const v = this.curveValue(secs[i]);
+      mine.push(v);
+      if (v > max) max = v;
+      if (i < this.bestCurve.length && this.bestCurve[i] > max) max = this.bestCurve[i];
+    }
+    const padL = Math.round(this.labelSize(w) * 2.6) + 4;
+    const padR = 8;
+    const padT = 12;
+    const padB = this.labelSize(w) + 12;
+    const iw = w - padL - padR;
+    const ih = h - padT - padB;
+    this.cmpCtx.clearRect(0, 0, w, h);
+    // 网格 + y 轴
+    this.cmpCtx.strokeStyle = Theme.grid(this.dark);
+    this.cmpCtx.lineWidth = 1;
+    this.cmpCtx.fillStyle = Theme.axis(this.dark);
+    this.cmpCtx.font = this.labelSize(this.cmpCtx.width) + 'px sans-serif';
+    for (let g = 0; g <= 2; g++) {
+      const val = Math.round((max / 2) * g);
+      const yy = padT + ih - (val / max) * ih;
+      this.cmpCtx.beginPath();
+      this.cmpCtx.moveTo(padL, yy);
+      this.cmpCtx.lineTo(padL + iw, yy);
+      this.cmpCtx.stroke();
+      this.cmpCtx.fillText(String(val), 4, yy + 4);
+    }
+    // 对数横轴：1s → 5h
+    const xOf = (i: number) => {
+      const t = Math.log(secs[i]) / Math.log(18000);
+      return padL + t * iw;
+    };
+    const yOf = (v: number) => padT + ih - (v / max) * ih;
+    const path = (pts: number[], color: string, width: number) => {
+      this.cmpCtx.strokeStyle = color;
+      this.cmpCtx.lineWidth = width;
+      this.cmpCtx.beginPath();
+      for (let i = 0; i < secs.length && i < pts.length; i++) {
+        if (pts[i] <= 0) continue;
+        const px = xOf(i);
+        const py = yOf(pts[i]);
+        if (i === 0) this.cmpCtx.moveTo(px, py);
+        else this.cmpCtx.lineTo(px, py);
+      }
+      this.cmpCtx.stroke();
+    };
+    path(this.bestCurve, '#8E5BD9', 1.6);
+    path(mine, Theme.ctl(this.dark), 2.4);
+    // x 轴标注
+    this.cmpCtx.fillStyle = Theme.axis(this.dark);
+    const marks = [60, 300, 1200, 3600];
+    for (let i = 0; i < secs.length; i++) {
+      for (let m = 0; m < marks.length; m++) {
+        if (secs[i] === marks[m]) {
+          const label = marks[m] >= 3600 ? (marks[m] / 3600) + 'h' : (marks[m] / 60) + 'm';
+          this.cmpCtx.fillText(label, xOf(i) - 8, h - 7);
+        }
+      }
+    }
+  }
+  /** 画布字号：以画布宽度为基准（图越大字越大），再乘系统字体缩放 */
+  private labelSize(canvasW: number): number {
+    let base = Math.round(canvasW / 26);
+    if (base < 11) base = 11;
+    if (base > 20) base = 20;
+    const scaled = Math.round(base * this.fontScale);
+    return scaled < 10 ? 10 : scaled;
+  }
+
   build() {
     Column() {
       Row() {
@@ -376,6 +628,78 @@ struct ActivityDetailPage {
                 this.zoneBar('Z5', this.hz(5), this.zoneMax(false), $r('app.color.danger'))
               }
               .padding(14).width('100%').backgroundColor($r('app.color.card_background_blur')).border({ width: 1, color: $r('app.color.card_border_highlight') }).borderRadius(14).margin({ top: 12 })
+            }
+// ── 分析：派生指标 + 曲线对比（Intervals.icu 风格）──
+            if (this.detail !== null) {
+              Column() {
+                Row() {
+                  Text('训练分析').fontSize(13).fontWeight(FontWeight.Medium)
+                  Blank()
+                  Text('由本次数据现算').fontSize(10).fontColor($r('app.color.text_hint'))
+                }
+                .width('100%')
+                Row() {
+                  Column() {
+                    Text('eFTP(本次20min)').fontSize(10).fontColor($r('app.color.text_tertiary'))
+                    Text(this.eftpFromRide() === null ? '--' : this.eftpFromRide() + ' W')
+                      .fontSize(17).fontWeight(FontWeight.Bold)
+                  }
+                  .alignItems(HorizontalAlign.Start).layoutWeight(1)
+                  Column() {
+                    Text('eFTP(90天最佳)').fontSize(10).fontColor($r('app.color.text_tertiary'))
+                    Text(this.eftpBest === null ? '待加载' : this.eftpBest + ' W')
+                      .fontSize(17).fontWeight(FontWeight.Bold).fontColor($r('app.color.accent'))
+                  }
+                  .alignItems(HorizontalAlign.Start).layoutWeight(1)
+                  Column() {
+                    Text('变异性 VI').fontSize(10).fontColor($r('app.color.text_tertiary'))
+                    Text(this.vi() === null ? '--' : '' + this.vi())
+                      .fontSize(17).fontWeight(FontWeight.Bold)
+                  }
+                  .alignItems(HorizontalAlign.Start).layoutWeight(1)
+                  Column() {
+                    Text('TSS/小时').fontSize(10).fontColor($r('app.color.text_tertiary'))
+                    Text(this.tssPerHour() === null ? '--' : '' + this.tssPerHour())
+                      .fontSize(17).fontWeight(FontWeight.Bold)
+                  }
+                  .alignItems(HorizontalAlign.Start).layoutWeight(1)
+                }
+                .width('100%').margin({ top: 8 })
+                Text('VI = NP/平均功率：<1.05 平稳（计时/稳定输出），>1.10 起伏大（间歇/爬坡/团练）')
+                  .fontSize(9).fontColor($r('app.color.text_hint')).width('100%').margin({ top: 6 })
+
+                if (this.cmpReady) {
+                  Canvas(this.cmpCtx)
+                    .width('100%').height(150).margin({ top: 10 })
+                    .onReady(() => { this.drawComparison(); })
+                  Row({ space: 12 }) {
+                    Row() {
+                      Row().width(10).height(2).backgroundColor(Theme.ctl(this.dark))
+                      Text(' 本次').fontSize(10).fontColor($r('app.color.text_tertiary'))
+                    }
+                    Row() {
+                      Row().width(10).height(2).backgroundColor('#8E5BD9')
+                      Text(' 近90天最佳（' + this.cmpCount + ' 次）').fontSize(10).fontColor($r('app.color.text_tertiary'))
+                    }
+                  }
+                  .width('100%').margin({ top: 6 })
+                } else {
+                  Row() {
+                    Text(this.cmpErr.length > 0 ? this.cmpErr : '对比近 90 天最佳曲线（最多取 10 次带功率的活动）')
+                      .fontSize(11).fontColor($r('app.color.text_secondary')).layoutWeight(1)
+                    Button(this.cmpLoading ? '加载中…' : '开始对比')
+                      .fontSize(12).height(30)
+                      .backgroundColor($r('app.color.accent')).fontColor($r('app.color.accent_on'))
+                      .enabled(!this.cmpLoading)
+                      .onClick(() => { this.loadComparison(); })
+                  }
+                  .width('100%').margin({ top: 10 })
+                }
+              }
+              .padding(14).width('100%').margin({ top: 10 })
+              .backgroundColor($r('app.color.card_background_blur'))
+              .border({ width: 1, color: $r('app.color.card_border_highlight') })
+              .borderRadius(14)
             }
             Row().height(96 + this.bottomInset)
           }

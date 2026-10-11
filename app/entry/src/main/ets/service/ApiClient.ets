@@ -4,7 +4,7 @@
  */
 import { http } from '@kit.NetworkKit';
 import { DeviceStore } from './DeviceStore';
-import { Summary, Activity, ActivityDetail, Trend, PairResult, DshLink, ChatReply } from '../model/Types';
+import { Summary, Activity, ActivityDetail, Trend, PairResult, DshLink, ChatReply , HrvInfo , HrvRange , CurveData , ActivitiesWindow } from '../model/Types';
 
 export class ApiError extends Error {
   code: number;
@@ -137,6 +137,31 @@ export class ApiClient {
       req.destroy();
     }
   }
+  /** HRV（Garmin HRV Status）：单日 */
+  static async getHrv(date: string): Promise<HrvInfo> {
+    const txt = await ApiClient.authedGet('/garmin-dash/api/hrv?date=' + date);
+    return JSON.parse(txt) as HrvInfo;
+  }
+
+  /** HRV（Garmin HRV Status）：最近 N 天，一次请求 */
+  static async getHrvRange(days: number): Promise<HrvRange> {
+    const txt = await ApiClient.authedGet('/garmin-dash/api/hrv-range?days=' + days);
+    return JSON.parse(txt) as HrvRange;
+  }
+
+  /** 功率曲线聚合（后端算好）：一次请求 */
+  static async getCurve(days: number): Promise<CurveData> {
+    const txt = await ApiClient.authedGet('/garmin-dash/api/curve?days=' + days);
+    return JSON.parse(txt) as CurveData;
+  }
+
+  /** 活动列表（按天窗口：近 N 天全部，不按条数截断） */
+  static async getActivitiesDays(days: number): Promise<Activity[]> {
+    const txt = await ApiClient.authedGet('/garmin-dash/api/activities?days=' + days);
+    const obj = JSON.parse(txt) as ActivitiesWindow;
+    return obj.activities;
+  }
+
   private static async authedGet(path: string): Promise<string> {
     const base = DeviceStore.getBaseUrl();
     if (base.length === 0) {

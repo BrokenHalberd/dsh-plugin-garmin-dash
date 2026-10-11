@@ -4,8 +4,13 @@ import { scanBarcode, scanCore } from '@kit.ScanKit';
 import { ApiClient, ApiError } from '../service/ApiClient';
 import { DeviceStore } from '../service/DeviceStore';
 import { PairResult } from '../model/Types';
+/** 底部选项栏 + 安全区高度：滚到底时用来避开遮挡 */
+const BOTTOM_BAR_PAD: number = 104;
+
 @Component
 export struct MeView {
+  /** 全局体重（kg），空 = 未设置 */
+  @State bodyWeight: string = DeviceStore.getBodyWeight();
   onChanged: () => void = () => {};
   @State baseUrl: string = DeviceStore.getBaseUrl();
   @State pairCode: string = '';
@@ -130,7 +135,39 @@ export struct MeView {
     this.msg = '已清除本机配对';
     this.onChanged();
   }
+  @Builder
+  weightCard() {
+    Column() {
+      Row() {
+        Text('个人设置').fontSize(14).fontWeight(FontWeight.Medium)
+        Blank()
+        Text('用于 W/kg 与等级判定').fontSize(10).fontColor($r('app.color.text_tertiary'))
+      }
+      .width('100%')
+      Row() {
+        Text('体重').fontSize(13).width(64)
+        TextInput({ text: this.bodyWeight, placeholder: '例如 72.5' })
+          .fontSize(14).type(InputType.Number).layoutWeight(1).height(38)
+          .backgroundColor($r('app.color.chip_background')).borderRadius(8)
+          .onChange((v: string) => {
+            this.bodyWeight = v;
+            DeviceStore.setBodyWeight(v);
+          })
+        Text('kg').fontSize(11).fontColor($r('app.color.text_hint')).width(28).textAlign(TextAlign.End)
+      }
+      .width('100%').margin({ top: 10 })
+      Text('改动立即保存并生效：功率形态的 W/kg、综合等级、车手类型都会按新体重重算。')
+        .fontSize(10).fontColor($r('app.color.text_hint')).width('100%').margin({ top: 8 })
+    }
+    .padding(16).width('100%')
+    .backgroundColor($r('app.color.card_background_blur'))
+    .border({ width: 1, color: $r('app.color.card_border_highlight') })
+    .borderRadius(14)
+    .margin({ top: 10 })
+  }
+
   build() {
+    Scroll() {
     Column() {
       Text('我的').fontSize(20).fontWeight(FontWeight.Bold)
         .width('100%').padding({ left: 4, top: 10, bottom: 10 })
@@ -222,10 +259,15 @@ export struct MeView {
       .padding(14).width('100%').backgroundColor($r('app.color.card_background_blur')).border({ width: 1, color: $r('app.color.card_border_highlight') }).borderRadius(14).margin({ top: 12 })
       Text('配对一次后长期有效：服务器域名固定，重启电脑也无需重新配对。')
         .fontSize(11).fontColor($r('app.color.text_hint')).width('100%').margin({ top: 12 })
+      this.weightCard()
     }
     .width('100%')
-    .height('100%')
+
     .padding({ left: 12, right: 12 })
     .alignItems(HorizontalAlign.Start)
+    }
+    .scrollBar(BarState.Off)
+    .width('100%')
+    .height('100%')
   }
 }

@@ -104,3 +104,59 @@ export interface ChatReply {
   sessionId: string;
   tools: string[];
 }
+/** Garmin HRV（HRV Status）：昨夜均值 / 7 天均值 / 状态与基线 */
+export interface HrvInfo {
+  available: boolean;
+  date: string;
+  lastNightAvg: number | null;
+  weeklyAvg: number | null;
+  status: string | null;
+  baselineLow: number | null;
+  baselineBalancedLow: number | null;
+  baselineBalancedUpper: number | null;
+  feedback: string | null;
+  reason: string | null;
+}
+/** HRV 单日 */
+export interface HrvDay {
+  date: string;
+  value: number | null;
+  status: string | null;
+  weeklyAvg: number | null;
+}
+
+/** HRV 区间（最近 N 天） */
+export interface HrvRange {
+  available: boolean;
+  days: HrvDay[];
+  count: number;
+  avg: number | null;
+  min: number | null;
+  max: number | null;
+  reason: string | null;
+}
+
+/** 后端聚合好的功率曲线（一次请求） */
+export interface CurveData {
+  days: number;
+  count: number;
+  scanned: number;
+  p42: number[];
+  p90: number[];
+  pall: number[];
+  e42: number | null;
+  e90: number | null;
+  eall: number | null;
+  zones: number[];
+  updatedAt: string;
+  error?: string;
+}
+
+/** 按天窗口的活动列表返回体 */
+export interface ActivitiesWindow {
+  days: number;
+  from: string;
+  count: number;
+  scanned: number;
+  activities: Activity[];
+}

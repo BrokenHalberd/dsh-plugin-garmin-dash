@@ -1,6 +1,6 @@
 import { ApiClient } from '../service/ApiClient';
 import { DeviceStore } from '../service/DeviceStore';
-import { Summary } from '../model/Types';
+import { Summary, Trend, TrendPoint , HrvInfo } from '../model/Types';
 import { Fmt } from '../util/Format';
 
 /**
@@ -17,6 +17,18 @@ interface StatCardCfg {
   sub: string;
 }
 
+const COLOR_ACCENT: ResourceColor = $r('app.color.accent');
+const COLOR_WARN: ResourceColor = $r('app.color.warn');
+const COLOR_DANGER: ResourceColor = $r('app.color.danger');
+const COLOR_TERTIARY: ResourceColor = $r('app.color.text_tertiary');
+const COLOR_SECONDARY: ResourceColor = $r('app.color.text_secondary');
+const COLOR_HINT: ResourceColor = $r('app.color.text_hint');
+const COLOR_CARD_BG: ResourceColor = $r('app.color.card_background_blur');
+const COLOR_CARD_BORDER: ResourceColor = $r('app.color.card_border_highlight');
+
+/** 底部选项栏 + 安全区高度：滚到底时用来避开遮挡 */
+const BOTTOM_BAR_PAD: number = 104;
+
 @Component
 export struct StatusView {
   @Prop @Watch('onTick') tick: number = 0;
@@ -26,8 +38,16 @@ export struct StatusView {
   @State err: string = '';
   @State staleNote: string = '';
   @State date: string = Fmt.today();
+  // ── 今日表单（复用 /trend；概念来自 Intervals.icu 的 TSB）──
+  @State tsb: number | null = null;
+  @State ctl: number | null = null;
+  @State atl: number | null = null;
+  @State ramp: number | null = null;
+  @State hrv: HrvInfo | null = null;
+  @State hrvErr: string = '';
 
   aboutToAppear(): void {
+    this.loadHrv(false);
     this.load(false);
   }
 
@@ -281,6 +301,409 @@ export struct StatusView {
     .margin({ bottom: 10 })
   }
 
+  /** 载入今日表单：优先复用趋势页缓存，其次拉 30 天窗口 */
+
+  /** 载入今日 HRV（1 小时缓存） */
+  private loadHrv(force: boolean): void {
+    this.hrvErr = '';
+    if (!DeviceStore.isPaired()) {
+      this.hrvErr = '尚未配对（请到「我的」完成配对）';
+      return;
+    }
+    const key = 'hrv:today';
+    if (!force) {
+      const cached = DeviceStore.cacheGet(key);
+      if (cached.length > 10 && DeviceStore.cacheAge(key) < 3600000) {
+        try {
+          this.hrv = JSON.parse(cached) as HrvInfo;
+          return;
+        } catch (e) {
+          this.hrvErr = '本地缓存损坏，正在重取';
+        }
+      }
+    }
+    ApiClient.getHrv(this.date)
+      .then((h: HrvInfo) => {
+        this.hrv = h;
+        this.hrvErr = '';
+        DeviceStore.cachePut(key, JSON.stringify(h));
+      })
+      .catch((e: Object) => {
+        this.hrvErr = ApiClient.friendly(e);
+      });
+  }
+
+  private hrvText(): string {
+    const h = this.hrv;
+    return h === null || h.lastNightAvg === null ? '--' : '' + h.lastNightAvg;
+  }
+
+  private hrvStatusText(): string {
+    const h = this.hrv;
+    if (this.hrvErr.length > 0) {
+      return '读取失败';
+    }
+    if (h === null) {
+      return '读取中';
+    }
+    if (h.status === null) {
+      return h.available ? '--' : '无数据';
+    }
+    if (h.status === 'LOW') {
+      return '偏低';
+    }
+    if (h.status === 'HIGH') {
+      return '偏高';
+    }
+    if (h.status === 'BALANCED') {
+      return '平衡';
+    }
+    return h.status;
+  }
+
+  private hrvColor(): ResourceColor {
+    const h = this.hrv;
+    if (h === null || h.status === null) {
+      return COLOR_TERTIARY;
+    }
+    if (h.status === 'LOW') {
+      return COLOR_WARN;
+    }
+    if (h.status === 'HIGH') {
+      return COLOR_DANGER;
+    }
+    return COLOR_ACCENT;
+  }
+
+  private hrvAdvice(): string {
+    const h = this.hrv;
+    if (this.hrvErr.length > 0) {
+      return 'HRV 读取失败：' + this.hrvErr + '　（点右上角「刷新」重试）';
+    }
+    if (h === null) {
+      return '正在读取佳明 HRV Status…';
+    }
+    if (!h.available) {
+      return '该日期没有 HRV 数据（需要手表支持 HRV Status 且佩戴过夜）';
+    }
+    if (h.status === 'LOW') {
+      return 'HRV 偏低：优先睡眠与恢复，今天避免阈值以上高强度';
+    }
+    if (h.status === 'HIGH') {
+      return 'HRV 偏高：恢复良好，可正常或略加量';
+    }
+    return 'HRV 平衡：按计划推进即可';
+  }
+
+  private hrvBarPct(kind: string): string {
+    const h = this.hrv;
+    if (h === null || h.baselineLow === null || h.baselineBalancedLow === null || h.baselineBalancedUpper === null) {
+      return '33%';
+    }
+    const lo = h.baselineLow;
+    const b1 = h.baselineBalancedLow;
+    const b2 = h.baselineBalancedUpper;
+    const v = h.lastNightAvg === null ? b2 : h.lastNightAvg;
+    const hi = Math.max(b2 * 1.25, v * 1.15);
+    const span = hi - lo;
+    if (span <= 0) {
+      return '33%';
+    }
+    if (kind === 'low') {
+      return Math.round(((b1 - lo) / span) * 100) + '%';
+    }
+    if (kind === 'mid') {
+      return Math.round(((b2 - b1) / span) * 100) + '%';
+    }
+    return Math.round(((hi - b2) / span) * 100) + '%';
+  }
+
+  @Builder
+  hrvCard() {
+    Column() {
+      Row() {
+        Column() {
+          Row() {
+
+            Text('HRV（昨夜）').fontSize(11).fontColor($r('app.color.text_tertiary'))
+
+            Blank()
+
+            Text('刷新HRV').fontSize(10).fontColor($r('app.color.accent'))
+
+              .onClick(() => { this.hrv = null; this.loadHrv(true); })
+
+          }
+
+          .width('100%')
+          Text(this.hrvText() + ' ms').fontSize(24).fontWeight(FontWeight.Bold).fontColor(this.hrvColor())
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+        Column() {
+          Text(this.hrvStatusText()).fontSize(14).fontWeight(FontWeight.Bold).fontColor(this.hrvColor())
+          Text('7 天均值 ' + this.hrvWeeklyText()).fontSize(10).fontColor(COLOR_TERTIARY)
+            .margin({ top: 3 })
+        }
+        .alignItems(HorizontalAlign.End)
+      }
+      .width('100%')
+
+      Row() {
+        Row().width(this.hrvBarPct('low')).height(10).backgroundColor(COLOR_DANGER)
+        Row().width(this.hrvBarPct('mid')).height(10).backgroundColor(COLOR_ACCENT)
+        Row().width(this.hrvBarPct('high')).height(10).backgroundColor(COLOR_WARN)
+      }
+      .width('100%').borderRadius(5).clip(true).margin({ top: 10 })
+      Row() {
+        Text('低').fontSize(9).fontColor(COLOR_HINT).layoutWeight(1)
+        Text('平衡').fontSize(9).fontColor(COLOR_HINT).layoutWeight(1).textAlign(TextAlign.Center)
+        Text('高').fontSize(9).fontColor(COLOR_HINT).layoutWeight(1).textAlign(TextAlign.End)
+      }
+      .width('100%').margin({ top: 2 })
+
+      Text(this.hrvAdvice()).fontSize(11).fontColor(COLOR_SECONDARY).width('100%').margin({ top: 8 })
+      Text('数据来源：佳明 HRV Status（基线区间分低/平衡/高三段）')
+        .fontSize(9).fontColor(COLOR_HINT).width('100%').margin({ top: 4 })
+    }
+    .padding(14).width('100%')
+    .backgroundColor(COLOR_CARD_BG)
+    .border({ width: 1, color: COLOR_CARD_BORDER })
+    .borderRadius(14)
+    .margin({ bottom: 10 })
+  }
+
+  private hrvWeeklyText(): string {
+    const h = this.hrv;
+    return h === null || h.weeklyAvg === null ? '--' : h.weeklyAvg + ' ms';
+  }
+
+  private loadForm(): void {
+
+    const cached = DeviceStore.cacheGet('trend:90');
+
+    if (cached.length > 10) {
+
+      this.applyTrend(cached);
+
+      return;
+
+    }
+
+    if (!DeviceStore.isPaired()) {
+
+      return;
+
+    }
+
+    ApiClient.getTrend(30)
+
+      .then((t: Trend) => {
+
+        const json = JSON.stringify(t);
+
+        DeviceStore.cachePut('trend:30', json);
+
+        this.applyTrend(json);
+
+      })
+
+      .catch((e: Object) => { });
+
+  }
+
+  /** 从趋势数据里取最后一点的 CTL/ATL/TSB，并算 7 天 ramp */
+
+  private applyTrend(json: string): void {
+
+    try {
+
+      const t = JSON.parse(json) as Trend;
+
+      if (t.points.length === 0) {
+
+        return;
+
+      }
+
+      const last: TrendPoint = t.points[t.points.length - 1];
+
+      this.tsb = last.tsb;
+
+      this.ctl = last.ctl;
+
+      this.atl = last.atl;
+
+      if (t.points.length >= 8) {
+
+        const before = t.points[t.points.length - 8].ctl;
+
+        if (before !== null && last.ctl !== null) {
+
+          this.ramp = Math.round((last.ctl - before) * 10) / 10;
+
+        }
+
+      }
+
+    } catch (e) {
+
+      DeviceStore.cachePut('trend:30', '');
+
+    }
+
+  }
+
+  private formTitle(): string {
+
+    const t = this.tsb;
+
+    if (t === null) {
+
+      return '等待数据';
+
+    }
+
+    if (t > 5) {
+
+      return '新鲜';
+
+    }
+
+    if (t >= -10) {
+
+      return '正常训练';
+
+    }
+
+    if (t >= -30) {
+
+      return '有负荷';
+
+    }
+
+    return '过度疲劳';
+
+  }
+
+  private formAdvice(): string {
+
+    const t = this.tsb;
+
+    if (t === null) {
+
+      return '先骑一次带功率的车，就能算出你的体能/疲劳/表单';
+
+    }
+
+    if (t > 5) {
+
+      return '状态好：适合比赛、FTP 测试或高强度间歇';
+
+    }
+
+    if (t >= -10) {
+
+      return '负荷与恢复平衡：按计划推进即可';
+
+    }
+
+    if (t >= -30) {
+
+      return '训练期常态：保证睡眠与补给，别再叠加质量课';
+
+    }
+
+    return '建议减量 2~3 天（轻松骑或休息），避免受伤与免疫下降';
+
+  }
+
+  private formColor(): ResourceColor {
+
+    const t = this.tsb;
+
+    if (t === null) {
+
+      return $r('app.color.text_tertiary');
+
+    }
+
+    if (t >= -10) {
+
+      return $r('app.color.accent');
+
+    }
+
+    if (t >= -30) {
+
+      return $r('app.color.warn');
+
+    }
+
+    return $r('app.color.danger');
+
+  }
+
+  @Builder
+
+  formCard() {
+
+    Column() {
+
+      Row() {
+
+        Column() {
+
+          Text('今日表单 TSB').fontSize(11).fontColor($r('app.color.text_tertiary'))
+
+          Text(this.tsb === null ? '--' : '' + this.tsb)
+
+            .fontSize(26).fontWeight(FontWeight.Bold).fontColor(this.formColor())
+
+        }
+
+        .alignItems(HorizontalAlign.Start)
+
+        .layoutWeight(1)
+
+        Column() {
+
+          Text(this.formTitle()).fontSize(14).fontWeight(FontWeight.Bold).fontColor(this.formColor())
+
+          Text('体能 ' + (this.ctl === null ? '--' : '' + this.ctl)
+
+            + ' · 疲劳 ' + (this.atl === null ? '--' : '' + this.atl)
+
+            + ' · Ramp ' + (this.ramp === null ? '--' : '' + this.ramp))
+
+            .fontSize(10).fontColor($r('app.color.text_tertiary')).margin({ top: 3 })
+
+        }
+
+        .alignItems(HorizontalAlign.End)
+
+      }
+
+      .width('100%')
+
+      Text(this.formAdvice()).fontSize(11).fontColor($r('app.color.text_secondary'))
+
+        .width('100%').margin({ top: 6 })
+
+    }
+
+    .padding(14).width('100%')
+
+    .backgroundColor($r('app.color.card_background_blur'))
+
+    .border({ width: 1, color: $r('app.color.card_border_highlight') })
+
+    .borderRadius(14)
+
+    .margin({ bottom: 10 })
+
+  }
+
   build() {
     Refresh({ refreshing: $$this.refreshing }) {
       Scroll() {
@@ -297,6 +720,9 @@ export struct StatusView {
           }
           .width('100%')
           .padding({ top: 10, bottom: 10 })
+
+          this.formCard()
+          this.hrvCard()
 
           if (this.staleNote.length > 0) {
             Text(this.staleNote).fontSize(11).fontColor($r('app.color.banner_text'))
@@ -336,7 +762,7 @@ export struct StatusView {
             }
 
             Text('下拉刷新 · 切换标签页自动刷新')
-              .fontSize(11).fontColor($r('app.color.text_hint')).width('100%').margin({ top: 4, bottom: 96 })
+              .fontSize(11).fontColor($r('app.color.text_hint')).width('100%').margin({ top: 4 })
           }
         }
         .width('100%')
