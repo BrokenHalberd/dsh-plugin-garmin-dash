@@ -11,6 +11,9 @@ const BOTTOM_BAR_PAD: number = 104;
 export struct MeView {
   /** 全局体重（kg），空 = 未设置 */
   @State bodyWeight: string = DeviceStore.getBodyWeight();
+  /** 等级阈值表粘贴内容（每行：名称,5s,1min,5min,20min,60min） */
+  @State levelText: string = '';
+  @State levelMsg: string = '';
   onChanged: () => void = () => {};
   @State baseUrl: string = DeviceStore.getBaseUrl();
   @State pairCode: string = '';
@@ -135,6 +138,84 @@ export struct MeView {
     this.msg = '已清除本机配对';
     this.onChanged();
   }
+  /** 解析粘贴的等级表：每行「名称,5s,1min,5min,20min,60min」 */
+  private parseLevelTable(): void {
+    const lines = this.levelText.split('\n');
+    const names: string[] = [];
+    const wkg: number[][] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line.length === 0) {
+        continue;
+      }
+      const parts = line.split(',');
+      if (parts.length < 6) {
+        continue;
+      }
+      const row: number[] = [];
+      let ok = true;
+      for (let j = 1; j <= 5; j++) {
+        const v = Number.parseFloat(parts[j]);
+        if (!Number.isFinite(v)) {
+          ok = false;
+          break;
+        }
+        row.push(v);
+      }
+      if (!ok) {
+        continue;
+      }
+      names.push(parts[0].trim());
+      wkg.push(row);
+    }
+    if (names.length === 0) {
+      this.levelMsg = '没解析到有效行：每行需 6 段，例如 Hero,25.18,11.50,7.60,6.71,6.60';
+      return;
+    }
+    DeviceStore.setLevelTable(JSON.stringify({ names: names, wkg: wkg }));
+    this.levelMsg = '已保存 ' + names.length + ' 个等级：' + names.join(' / ');
+  }
+
+  @Builder
+  levelTableCard() {
+    Column() {
+      Row() {
+        Text('等级阈值表').fontSize(14).fontWeight(FontWeight.Medium)
+        Blank()
+        Text(DeviceStore.getLevelTable().length > 10 ? '自定义 ✓' : '内置 Coggan')
+          .fontSize(10).fontColor($r('app.color.text_tertiary'))
+      }
+      .width('100%')
+
+      TextArea({ text: this.levelText, placeholder: '每行：名称,5s,1min,5min,20min,60min\n例如：\nHero,25.18,11.50,7.60,6.71,6.60\nNoob,9.44,5.39,3.58,2.02,1.88' })
+        .fontSize(12).height(120).width('100%').margin({ top: 8 })
+        .backgroundColor($r('app.color.chip_background')).borderRadius(8)
+        .onChange((v: string) => { this.levelText = v; })
+
+      Row({ space: 10 }) {
+        Button('保存等级表').fontSize(13).height(34).layoutWeight(1)
+          .backgroundColor($r('app.color.accent')).fontColor($r('app.color.accent_on'))
+          .onClick(() => { this.parseLevelTable(); })
+        Button('恢复内置').fontSize(13).height(34).layoutWeight(1)
+          .backgroundColor($r('app.color.chip_background')).fontColor($r('app.color.text_secondary'))
+          .onClick(() => {
+            DeviceStore.setLevelTable('');
+            this.levelText = '';
+            this.levelMsg = '已恢复内置 Coggan 表';
+          })
+      }
+      .width('100%').margin({ top: 8 })
+
+      Text(this.levelMsg.length > 0 ? this.levelMsg : '列顺序固定：5秒 / 1分钟 / 5分钟 / 20分钟 / 60分钟；判定取「≥ 该档下限」的最高档。')
+        .fontSize(10).fontColor($r('app.color.text_hint')).width('100%').margin({ top: 8 })
+    }
+    .padding(16).width('100%')
+    .backgroundColor($r('app.color.card_background_blur'))
+    .border({ width: 1, color: $r('app.color.card_border_highlight') })
+    .borderRadius(14)
+    .margin({ top: 10 })
+  }
+
   @Builder
   weightCard() {
     Column() {
@@ -260,6 +341,7 @@ export struct MeView {
       Text('配对一次后长期有效：服务器域名固定，重启电脑也无需重新配对。')
         .fontSize(11).fontColor($r('app.color.text_hint')).width('100%').margin({ top: 12 })
       this.weightCard()
+      this.levelTableCard()
     }
     .width('100%')
 

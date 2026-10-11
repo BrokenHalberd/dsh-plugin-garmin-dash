@@ -33,6 +33,12 @@ interface CurveDetail extends ActivityDetail {
 }
 
 /** 近 90 天最佳曲线缓存体 */
+/** 等级阈值表（可由用户粘贴覆盖内置 Coggan 表） */
+interface LevelTable {
+  names: string[];
+  wkg: number[][];
+}
+
 interface CurveBest {
   windowFrom?: string;
   windowTo?: string;
@@ -91,16 +97,34 @@ const DUR_NAMES_W: string[] = ['5s', '1min', '5min', '20min', '60min'];
 const DUR_WEIGHTS_W: number[] = [1, 1, 2, 3, 3];
 const EFTP_WEIGHT: number = 3;
 
-const COGGAN_LEVELS: string[] = ['世界级', '专业', 'Cat 1', 'Cat 2', 'Cat 3', 'Cat 4', 'Cat 5', '未训练'];
+/** 车手类型说明（名称 + 一句话） */
+interface RiderTypeItem {
+  name: string;
+  desc: string;
+}
+
+const RIDER_TYPES: RiderTypeItem[] = [
+  { name: '冲刺手', desc: '5 秒爆发极高、1 分钟衰减快，适合终点冲刺与短陡坡' },
+  { name: '追击型', desc: '1 分钟级输出强，短时反复拉扯能力好' },
+  { name: '计时赛手', desc: '曲线平坦，20 分钟到 60 分钟保持率高' },
+  { name: '健将型', desc: '短时与长时都不弱，各类赛道都能应付' },
+  { name: '爬坡手', desc: '长时 W/kg 高，体重轻、持续爬坡能力强' },
+  { name: '古典型', desc: '陡坡冲刺突出：5 分钟相对强于 20 分钟' },
+  { name: '耐力型', desc: '长距离保持好，适合超长距离与多日赛' },
+  { name: '力量型', desc: '低踏频大扭矩能力强，平路巡航有优势' }
+];
+
+const COGGAN_LEVELS: string[] = ['Hero', 'Pro', 'Cat 1', 'Cat 2', 'Cat 3', 'Cat 4', 'Cat 5', 'Noob'];
+/** Coggan 功率等级表（W/kg）· 列 = 5秒 / 1分钟 / 5分钟 / 20分钟 / 60分钟FTP。取各档「下限」作为门槛 */
 const COGGAN_WKG: number[][] = [
-  [23.5, 11.5, 7.6, 6.4],
-  [20.8, 9.7, 6.3, 5.6],
-  [18.4, 8.3, 5.7, 5.1],
-  [16.6, 7.5, 5.1, 4.6],
-  [15.3, 6.9, 4.7, 4.2],
-  [13.9, 6.5, 4.3, 3.9],
-  [12.4, 5.9, 3.9, 3.6],
-  [9.7, 4.7, 3.1, 2.8]
+  [23.36, 10.79, 6.97, 6.14, 6.03],
+  [20.94, 9.86, 6.12, 5.38, 5.26],
+  [18.52, 8.91, 5.27, 4.62, 4.50],
+  [16.10, 7.97, 4.43, 3.85, 3.74],
+  [13.68, 7.04, 3.58, 3.09, 2.98],
+  [11.26, 6.09, 2.74, 2.33, 2.21],
+  [9.44, 5.39, 2.10, 1.76, 1.68],
+  [0, 0, 0, 0, 0]
 ];
 
 const PANELS: PanelDef[] = [
@@ -114,7 +138,7 @@ const PANELS: PanelDef[] = [
 ];
 
 /**
- * 数据中心 —— 把趋势页升级为多面板分析中心（对齐 Intervals.icu / BT300 的信息架构）。
+ * 数据中心 —— 把趋势页升级为多面板分析中心（对齐 Intervals.icu / Coggan 的信息架构）。
  *
  * 数据全部来自现有接口：
  *   · `/trend?days=90`  → CTL/ATL/TSB 序列 + 周汇总
@@ -197,7 +221,8 @@ export struct TrendView {
   private ctx: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.settings);
   private curveSettings: RenderingContextSettings = new RenderingContextSettings(true);
   private curveCtx: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.curveSettings);
-
+  private refSettings: RenderingContextSettings = new RenderingContextSettings(true);
+  private refCtx: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.refSettings);
   aboutToAppear(): void {
     this.dark = Theme.isDark(getContext(this) as common.UIAbilityContext);
     try {
@@ -971,6 +996,38 @@ export struct TrendView {
     return '未训练';
   }
 
+  /** 当前生效的等级表：优先用粘贴的，否则用内置 Coggan 表 */
+  private tableOf(): LevelTable {
+    const raw = DeviceStore.getLevelTable();
+    if (raw.length > 10) {
+      try {
+        const t = JSON.parse(raw) as LevelTable;
+        if (t.names.length > 0 && t.wkg.length === t.names.length) {
+          return t;
+        }
+      } catch (e) {
+      }
+    }
+    const names: string[] = [];
+    for (let i = 0; i < COGGAN_LEVELS.length; i++) {
+      names.push(COGGAN_LEVELS[i]);
+    }
+    const wkg: number[][] = [];
+    for (let i = 0; i < COGGAN_WKG.length; i++) {
+      const row: number[] = [];
+      for (let j = 0; j < COGGAN_WKG[i].length; j++) {
+        row.push(COGGAN_WKG[i][j]);
+      }
+      wkg.push(row);
+    }
+    return { names: names, wkg: wkg };
+  }
+
+  /** 等级表来源说明（页面显示用） */
+  private tableSource(): string {
+    return DeviceStore.getLevelTable().length > 10 ? '自定义（已粘贴）' : '功率等级（Coggan 标准）';
+  }
+
   /** 某时长的 W/kg（列 0..4 = 5s/1min/5min/20min/60min，5 = eFTP） */
   private wkgW(i: number): number {
     const m = this.massKg();
@@ -996,8 +1053,7 @@ export struct TrendView {
     if (v <= 0) {
       return -1;
     }
-    let col = 3;
-    let scale = 1;
+    let col = 4;
     if (i === 0) {
       col = 0;
     } else if (i === 1) {
@@ -1005,14 +1061,19 @@ export struct TrendView {
     } else if (i === 2) {
       col = 2;
     } else if (i === 3) {
-      scale = 1.05;
+      col = 3;
     }
-    for (let k = 0; k < COGGAN_LEVELS.length; k++) {
-      if (v >= COGGAN_WKG[k][col] * scale) {
+    const table = this.tableOf();
+    for (let k = 0; k < table.names.length; k++) {
+      const row = table.wkg[k];
+      if (row === undefined || col >= row.length) {
+        continue;
+      }
+      if (v >= row[col]) {
         return k;
       }
     }
-    return COGGAN_LEVELS.length - 1;
+    return table.names.length - 1;
   }
 
   /** 综合等级：逐时长等级下标的加权平均（取整） */
@@ -1039,10 +1100,11 @@ export struct TrendView {
   }
 
   private levelName(lv: number): string {
-    if (lv < 0 || lv >= COGGAN_LEVELS.length) {
+    const table = this.tableOf();
+    if (lv < 0 || lv >= table.names.length) {
       return '--';
     }
-    return COGGAN_LEVELS[lv];
+    return table.names[lv];
   }
 
   /** 比值 r1=1min/5s、r2=5min/1min、r3=20min/5min */
@@ -1159,6 +1221,161 @@ export struct TrendView {
     .borderRadius(14)
   }
 
+  /** 指定周期的某时长 W/kg（period: 0=42天 1=90天 2=全部 3=eFTP） */
+  private wkgP(period: number, i: number): number {
+    const m = this.massKg();
+    if (m <= 0) {
+      return 0;
+    }
+    let w = 0;
+    if (i === 5) {
+      if (period === 0) {
+        w = this.e42 === null ? 0 : this.e42;
+      } else if (period === 1) {
+        w = this.e90 === null ? 0 : this.e90;
+      } else {
+        w = this.eall === null ? 0 : this.eall;
+      }
+    } else {
+      const arr = period === 0 ? this.p42 : (period === 1 ? this.p90 : this.pall);
+      w = arr.length > DUR_IDX_W[i] ? arr[DUR_IDX_W[i]] : 0;
+    }
+    return w > 0 ? Math.round((w / m) * 100) / 100 : 0;
+  }
+
+  /** 用户在该时长的等级下标（按 90 天口径） */
+  private myLevelAt(col: number): number {
+    const v = this.wkgP(1, col === 5 ? 5 : col);
+    return v;
+  }
+
+  /** 等级表某行某列的阈值（5 列：5s/1min/5min/20min/60min） */
+  private refAt(level: number, col: number): number {
+    const t = this.tableOf();
+    if (level < 0 || level >= t.wkg.length) {
+      return 0;
+    }
+    const row = t.wkg[level];
+    return col < row.length ? row[col] : 0;
+  }
+
+  /** 用户 5 个时长（不含 eFTP）各自落在哪个等级 */
+  private myLevelIdx(col: number): number {
+    const v = this.wkgP(1, col);
+    if (v <= 0) {
+      return -1;
+    }
+    const t = this.tableOf();
+    for (let k = 0; k < t.names.length; k++) {
+      if (v >= this.refAt(k, col)) {
+        return k;
+      }
+    }
+    return t.names.length - 1;
+  }
+
+  /** 等级参考曲线图（8 条灰线 + 用户两条彩线，纵轴 W/kg） */
+  private drawRefChart(): void {
+    const w = this.refCtx.width;
+    const h = this.refCtx.height;
+    if (w <= 0 || h <= 0) {
+      return;
+    }
+    const font = this.labelSize(w);
+    const padL = Math.round(font * 2.8) + 4;
+    const padR = 8;
+    const padT = 10;
+    const padB = font + 12;
+    const iw = w - padL - padR;
+    const ih = h - padT - padB;
+    const t = this.tableOf();
+    let maxV = 1;
+    for (let k = 0; k < t.wkg.length; k++) {
+      for (let c = 0; c < 5; c++) {
+        const v = this.refAt(k, c);
+        if (v > maxV) {
+          maxV = v;
+        }
+      }
+    }
+    for (let c = 0; c < 5; c++) {
+      const v = this.wkgP(1, c);
+      if (v > maxV) {
+        maxV = v;
+      }
+      const v2 = this.wkgP(0, c);
+      if (v2 > maxV) {
+        maxV = v2;
+      }
+    }
+    maxV = Math.round(maxV * 1.08);
+    const xOf = (c: number) => padL + (c / 4) * iw;
+    const yOf = (v: number) => padT + ih - (v / maxV) * ih;
+    this.refCtx.clearRect(0, 0, w, h);
+    // 网格与纵轴
+    this.refCtx.strokeStyle = Theme.grid(this.dark);
+    this.refCtx.lineWidth = 1;
+    this.refCtx.fillStyle = Theme.axis(this.dark);
+    this.refCtx.font = font + 'px sans-serif';
+    for (let g = 0; g <= 2; g++) {
+      const val = Math.round((maxV / 2) * g);
+      const yy = yOf(val);
+      this.refCtx.beginPath();
+      this.refCtx.moveTo(padL, yy);
+      this.refCtx.lineTo(padL + iw, yy);
+      this.refCtx.stroke();
+      this.refCtx.fillText(String(val), Math.round(font * 0.3), yy + Math.round(font * 0.35));
+    }
+    // 8 条等级参考曲线（灰）
+    this.refCtx.globalAlpha = 0.55;
+    for (let k = 0; k < t.wkg.length; k++) {
+      this.refCtx.strokeStyle = '#8A93A5';
+      this.refCtx.lineWidth = 1;
+      this.refCtx.beginPath();
+      for (let c = 0; c < 5; c++) {
+        const px = xOf(c);
+        const py = yOf(this.refAt(k, c));
+        if (c === 0) {
+          this.refCtx.moveTo(px, py);
+        } else {
+          this.refCtx.lineTo(px, py);
+        }
+      }
+      this.refCtx.stroke();
+    }
+    this.refCtx.globalAlpha = 1;
+    // 用户曲线：42 天（橙）/ 90 天（蓝）
+    const line = (period: number, color: string, width: number) => {
+      this.refCtx.strokeStyle = color;
+      this.refCtx.lineWidth = width;
+      this.refCtx.beginPath();
+      let started = false;
+      for (let c = 0; c < 5; c++) {
+        const v = this.wkgP(period, c);
+        if (v <= 0) {
+          continue;
+        }
+        const px = xOf(c);
+        const py = yOf(v);
+        if (!started) {
+          this.refCtx.moveTo(px, py);
+          started = true;
+        } else {
+          this.refCtx.lineTo(px, py);
+        }
+      }
+      this.refCtx.stroke();
+    };
+    line(0, '#E0A33E', 2.4);
+    line(1, Theme.ctl(this.dark), 2.4);
+    // 横轴标签
+    this.refCtx.fillStyle = Theme.axis(this.dark);
+    const labels: string[] = ['5s', '1min', '5min', '20min', '60min'];
+    for (let c = 0; c < 5; c++) {
+      this.refCtx.fillText(labels[c], Math.max(padL, xOf(c) - font), h - 6);
+    }
+  }
+
   @Builder
   riderTypeCard() {
     Column() {
@@ -1215,10 +1432,152 @@ export struct TrendView {
       .width('100%').padding({ top: 4, bottom: 4 })
 
       Text(this.riderTypeHint()).fontSize(9).fontColor(COLOR_HINT).width('100%').margin({ top: 8 })
-      Text('综合等级 = 各时长等级的加权平均（20min/60min/eFTP 权重 3，5min 权重 2，1min/5s 权重 1），'
+      Text('等级表来源：' + this.tableSource() + '。综合等级 = 各时长等级的加权平均（20min/60min/eFTP 权重 3，5min 权重 2，1min/5s 权重 1），'
         + '因此 FTP 与有氧耐力影响最大；车手类型按 riduck 分类规则逐条判定，以 W/kg 绝对值为主'
         + '（曲线为多次骑行取各时长最大，衰减比会偏高）。体重只存本地。')
         .fontSize(9).fontColor(COLOR_HINT).width('100%').margin({ top: 4 })
+    }
+    .padding(14).width('100%').margin({ top: 10 })
+    .backgroundColor(COLOR_CARD_BG)
+    .border({ width: 1, color: COLOR_CARD_BORDER })
+    .borderRadius(14)
+  }
+
+  /** ① 顶部两张判定卡 */
+  @Builder
+  shapeVerdictCards() {
+    Row({ space: 10 }) {
+      Column() {
+        Text('功率强项（等级）').fontSize(10).fontColor(COLOR_TERTIARY)
+        Text(this.levelName(this.compositeLevel())).fontSize(24).fontWeight(FontWeight.Bold).fontColor(COLOR_ACCENT)
+        Text('等级表：' + this.tableSource()).fontSize(9).fontColor(COLOR_HINT).margin({ top: 4 })
+      }
+      .alignItems(HorizontalAlign.Start).layoutWeight(1).padding(14)
+      .backgroundColor(COLOR_CARD_BG)
+      .border({ width: 1, color: COLOR_CARD_BORDER })
+      .borderRadius(14)
+
+      Column() {
+        Text('车手类型').fontSize(10).fontColor(COLOR_TERTIARY)
+        Text(this.riderType()).fontSize(20).fontWeight(FontWeight.Bold).fontColor(COLOR_DANGER)
+        Text('按 riduck 规则（W/kg 绝对值为主）').fontSize(9).fontColor(COLOR_HINT).margin({ top: 4 })
+      }
+      .alignItems(HorizontalAlign.Start).layoutWeight(1).padding(14)
+      .backgroundColor(COLOR_CARD_BG)
+      .border({ width: 1, color: COLOR_CARD_BORDER })
+      .borderRadius(14)
+    }
+    .width('100%')
+  }
+
+  /** ② 等级参考曲线对比图 */
+  @Builder
+  shapeCompareCard() {
+    Column() {
+      Row() {
+        Text('功率形态对比（W/kg）').fontSize(13).fontWeight(FontWeight.Medium)
+        Blank()
+        Text(this.massKg() > 0 ? '体重 ' + this.massKg() + ' kg' : '需填体重')
+          .fontSize(10).fontColor(COLOR_TERTIARY)
+      }
+      .width('100%')
+      Canvas(this.refCtx)
+        .width('100%').height(200).margin({ top: 8 })
+        .onReady(() => { this.drawRefChart(); })
+        .backgroundColor(COLOR_CARD_BG)
+        .borderRadius(12)
+      Row({ space: 14 }) {
+        Row() {
+          Row().width(10).height(2).backgroundColor('#E0A33E')
+          Text(' 42 天').fontSize(10).fontColor(COLOR_TERTIARY)
+        }
+        Row() {
+          Row().width(10).height(2).backgroundColor(Theme.ctl(this.dark))
+          Text(' 90 天').fontSize(10).fontColor(COLOR_TERTIARY)
+        }
+        Row() {
+          Row().width(10).height(2).backgroundColor('#8A93A5')
+          Text(' 各等级参考').fontSize(10).fontColor(COLOR_TERTIARY)
+        }
+      }
+      .width('100%').margin({ top: 6 })
+    }
+    .padding(14).width('100%').margin({ top: 10 })
+    .backgroundColor(COLOR_CARD_BG)
+    .border({ width: 1, color: COLOR_CARD_BORDER })
+    .borderRadius(14)
+  }
+
+  /** ③ 分档表：用户所在档高亮 */
+  @Builder
+  shapeTableCard() {
+    Column() {
+      Row() {
+        Text('等级分档（W/kg）').fontSize(13).fontWeight(FontWeight.Medium)
+        Blank()
+        Text('高亮 = 你 90 天所在档').fontSize(9).fontColor(COLOR_HINT)
+      }
+      .width('100%')
+      Row() {
+        Text('等级').fontSize(10).fontColor(COLOR_TERTIARY).width(52)
+        ForEach(DUR_NAMES_W, (nm: string) => {
+          Text(nm).fontSize(10).fontColor(COLOR_TERTIARY).layoutWeight(1).textAlign(TextAlign.End)
+        }, (nm: string) => nm)
+      }
+      .width('100%').padding({ top: 8, bottom: 4 })
+      ForEach(this.tableOf().names, (nm: string, k: number) => {
+        Row() {
+          Text(nm).fontSize(11).width(52)
+            .fontColor(this.compositeLevel() === k ? COLOR_ACCENT : COLOR_SECONDARY)
+          ForEach(DUR_NAMES_W, (colNm: string, c: number) => {
+            Text(this.refAt(k, c) > 0 ? '' + this.refAt(k, c) : '--')
+              .fontSize(11).layoutWeight(1).textAlign(TextAlign.End)
+              .fontColor(this.myLevelIdx(c) === k ? COLOR_ACCENT : COLOR_SECONDARY)
+              .backgroundColor(this.myLevelIdx(c) === k ? COLOR_CHIP : Color.Transparent)
+              .borderRadius(4)
+          }, (colNm: string) => colNm)
+        }
+        .width('100%').padding({ top: 3, bottom: 3 })
+      }, (nm: string) => nm)
+      Divider().color(COLOR_CARD_BORDER).margin({ top: 6, bottom: 6 })
+      Row() {
+        Text('你的 90 天').fontSize(10).fontColor(COLOR_TERTIARY).width(52)
+        ForEach(DUR_NAMES_W, (nm: string, c: number) => {
+          Text(this.wkgP(1, c) > 0 ? '' + this.wkgP(1, c) : '--')
+            .fontSize(11).fontWeight(FontWeight.Medium).fontColor(COLOR_ACCENT)
+            .layoutWeight(1).textAlign(TextAlign.End)
+        }, (nm: string) => nm)
+      }
+      .width('100%')
+      Row() {
+        Text('42 天').fontSize(10).fontColor(COLOR_TERTIARY).width(52)
+        ForEach(DUR_NAMES_W, (nm: string, c: number) => {
+          Text(this.wkgP(0, c) > 0 ? '' + this.wkgP(0, c) : '--')
+            .fontSize(11).fontColor(COLOR_WARN).layoutWeight(1).textAlign(TextAlign.End)
+        }, (nm: string) => nm)
+      }
+      .width('100%')
+    }
+    .padding(14).width('100%').margin({ top: 10 })
+    .backgroundColor(COLOR_CARD_BG)
+    .border({ width: 1, color: COLOR_CARD_BORDER })
+    .borderRadius(14)
+  }
+
+  /** ④ 车手类型说明（8 类） */
+  @Builder
+  riderTypeGrid() {
+    Column() {
+      Text('车手类型说明').fontSize(13).fontWeight(FontWeight.Medium).width('100%')
+      ForEach(RIDER_TYPES, (it: RiderTypeItem) => {
+        Row() {
+          Text(it.name).fontSize(11).fontWeight(FontWeight.Medium)
+            .fontColor(this.riderType() === it.name ? COLOR_DANGER : COLOR_SECONDARY)
+            .width(72)
+          Text(it.desc).fontSize(10).fontColor(COLOR_HINT).layoutWeight(1)
+        }
+        .width('100%').padding({ top: 4, bottom: 4 })
+      }, (it: RiderTypeItem) => it.name)
     }
     .padding(14).width('100%').margin({ top: 10 })
     .backgroundColor(COLOR_CARD_BG)
@@ -1231,41 +1590,47 @@ export struct TrendView {
     Column() {
       if (!this.curveReady) {
         Row() {
-          Text('需要先聚合功率曲线')
-            .fontSize(11).fontColor($r('app.color.text_secondary')).layoutWeight(1)
+          Text(this.curveErr.length > 0 ? this.curveErr : '需要先聚合功率曲线（后端算好，约 3 秒）')
+            .fontSize(11).fontColor(COLOR_SECONDARY).layoutWeight(1)
           Button(this.curveLoading ? '加载中…' : '开始聚合')
             .fontSize(12).height(30)
-            .backgroundColor($r('app.color.accent')).fontColor($r('app.color.accent_on'))
+            .backgroundColor(COLOR_ACCENT).fontColor($r('app.color.accent_on'))
             .enabled(!this.curveLoading)
             .onClick(() => { this.loadCurve(); })
         }
         .width('100%').padding(14)
-        .backgroundColor($r('app.color.card_background_blur'))
-        .border({ width: 1, color: $r('app.color.card_border_highlight') })
+        .backgroundColor(COLOR_CARD_BG)
+        .border({ width: 1, color: COLOR_CARD_BORDER })
         .borderRadius(14)
       } else {
-        Canvas(this.curveCtx)
-          .width('100%').height(200)
-          .onReady(() => { this.drawCurveChart(); })
-          .backgroundColor($r('app.color.card_background_blur'))
-          .borderRadius(12)
+        this.shapeVerdictCards()
+        this.shapeCompareCard()
+        this.shapeTableCard()
+        this.riderTypeGrid()
+
         Column() {
-          Text('形态判读').fontSize(13).fontWeight(FontWeight.Medium).width('100%')
-          Text(this.shapeVerdict()).fontSize(12).fontColor($r('app.color.text_secondary'))
-            .width('100%').margin({ top: 6 })
-          Text('纵轴为「该时长最佳功率 ÷ eFTP」的百分比：短时（5 秒/1 分钟）越高越偏无氧爆发，'
-            + '长时（20 分钟/1 小时）越接近 100% 越偏耐力/计时。')
-            .fontSize(10).fontColor($r('app.color.text_hint')).width('100%').margin({ top: 8 })
+          Row() {
+            Text('体重').fontSize(11).fontColor(COLOR_SECONDARY).width(52)
+            TextInput({ text: this.pWeight })
+              .fontSize(13).type(InputType.Normal).layoutWeight(1).height(32)
+              .backgroundColor(COLOR_CHIP).borderRadius(8)
+              .onChange((v: string) => {
+                this.pWeight = v;
+                DeviceStore.setBodyWeight(v);
+              })
+            Text('kg').fontSize(10).fontColor(COLOR_HINT).width(26).textAlign(TextAlign.End)
+          }
+          .width('100%')
+          Text('W/kg 与档位均由体重决定；体重建议在「我的 → 个人设置」统一维护。')
+            .fontSize(9).fontColor(COLOR_HINT).width('100%').margin({ top: 6 })
         }
         .padding(14).width('100%').margin({ top: 10 })
-        .backgroundColor($r('app.color.card_background_blur'))
-        .border({ width: 1, color: $r('app.color.card_border_highlight') })
+        .backgroundColor(COLOR_CARD_BG)
+        .border({ width: 1, color: COLOR_CARD_BORDER })
         .borderRadius(14)
       }
-      if (this.curveReady) {
-        this.riderTypeCard()
-      }
     }
+    .width('100%')
     .width('100%')
   }
 

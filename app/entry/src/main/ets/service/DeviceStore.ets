@@ -159,4 +159,14 @@ export class DeviceStore {
     s.putSync('predictEff', v);
     s.flush();
   }
+  // ── 等级阈值表（JSON：{names,wkg}；空 = 用内置表）──
+  static getLevelTable(): string {
+    return DeviceStore.ensure().getSync('levelTable', '') as string;
+  }
+
+  static setLevelTable(v: string): void {
+    const s = DeviceStore.ensure();
+    s.putSync('levelTable', v);
+    s.flush();
+  }
 }

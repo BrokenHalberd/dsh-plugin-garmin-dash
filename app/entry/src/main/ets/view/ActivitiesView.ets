@@ -71,7 +71,7 @@ export struct ActivitiesView {
       this.loading = true;
     }
     this.err = '';
-    ApiClient.getActivities(PAGE_SIZE, 0)
+    ApiClient.getActivitiesDays(90)
       .then((list: Activity[]) => {
         this.items = list;
         this.hasMore = list.length >= PAGE_SIZE;
