@@ -160,3 +160,13 @@ export interface ActivitiesWindow {
   scanned: number;
   activities: Activity[];
 }
+
+/** 身体电量（当日高/低值） */
+export interface BodyBattery {
+  available: boolean;
+  date: string;
+  value: number | null;
+  high: number | null;
+  low: number | null;
+  reason: string | null;
+}

@@ -1,6 +1,6 @@
 import { ApiClient } from '../service/ApiClient';
 import { DeviceStore } from '../service/DeviceStore';
-import { Summary, Trend, TrendPoint , HrvInfo } from '../model/Types';
+import { Summary, Trend, TrendPoint , HrvInfo , BodyBattery } from '../model/Types';
 import { Fmt } from '../util/Format';
 
 /**
@@ -45,9 +45,11 @@ export struct StatusView {
   @State ramp: number | null = null;
   @State hrv: HrvInfo | null = null;
   @State hrvErr: string = '';
+  @State bb: BodyBattery | null = null;
 
   aboutToAppear(): void {
     this.loadHrv(false);
+    this.loadBb();
     this.load(false);
   }
 
@@ -165,6 +167,10 @@ export struct StatusView {
 
   private bbText(): string {
     const s = this.summary;
+    const bb = this.bb;
+    if (bb !== null && bb.available && bb.high !== null) {
+      return '' + bb.high;
+    }
     return s === null ? '--' : Fmt.int(s.bodyBattery);
   }
 
@@ -304,6 +310,36 @@ export struct StatusView {
   /** 载入今日表单：优先复用趋势页缓存，其次拉 30 天窗口 */
 
   /** 载入今日 HRV（1 小时缓存） */
+  /** 载入当日身体电量（后端直连端点，缓存 1 小时） */
+  /** 身体电量副标题：显示当日最低值 */
+  private bbSubText(): string {
+    const bb = this.bb;
+    if (bb !== null && bb.available && bb.low !== null) {
+      return '当日最低 ' + bb.low;
+    }
+    return '当日最高值';
+  }
+
+  private loadBb(): void {
+    if (!DeviceStore.isPaired()) {
+      return;
+    }
+    const key = 'bb:today';
+    const cached = DeviceStore.cacheGet(key);
+    if (cached.length > 10 && DeviceStore.cacheAge(key) < 3600000) {
+      this.bb = JSON.parse(cached) as BodyBattery;
+      return;
+    }
+    ApiClient.getBodyBattery(this.date)
+      .then((b: BodyBattery) => {
+        this.bb = b;
+        if (b.available) {
+          DeviceStore.cachePut(key, JSON.stringify(b));
+        }
+      })
+      .catch((e: Object) => { });
+  }
+
   private loadHrv(force: boolean): void {
     this.hrvErr = '';
     if (!DeviceStore.isPaired()) {
@@ -752,8 +788,7 @@ export struct StatusView {
               this.card({ title: '步数', value: this.stepsText(), unit: '步', sub: '' })
               this.card({ title: '静息心率', value: this.rhrText(), unit: 'bpm', sub: '' })
               this.card({ title: '睡眠', value: this.sleepText(), unit: '', sub: this.sleepScoreText() })
-              this.card({ title: '体重', value: this.weightText(), unit: 'kg', sub: this.weightSubText() })
-              this.card({ title: 'Body Battery', value: this.bbText(), unit: '', sub: '' })
+              this.card({ title: 'Body Battery', value: this.bbText(), unit: '', sub: this.bbSubText() })
             }
             .width('100%')
 

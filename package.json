@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-garmin-dash",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "private": true,
   "description": "佳明仪表盘：把 Garmin Connect 数据暴露成手机 App 接口，并内置部署引导页 / 配对二维码 / App 产物分发（鸿蒙原生 App 配套后端）",
   "type": "module",

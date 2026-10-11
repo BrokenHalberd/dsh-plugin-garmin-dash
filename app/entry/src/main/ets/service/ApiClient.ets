@@ -4,7 +4,7 @@
  */
 import { http } from '@kit.NetworkKit';
 import { DeviceStore } from './DeviceStore';
-import { Summary, Activity, ActivityDetail, Trend, PairResult, DshLink, ChatReply , HrvInfo , HrvRange , CurveData , ActivitiesWindow } from '../model/Types';
+import { Summary, Activity, ActivityDetail, Trend, PairResult, DshLink, ChatReply , HrvInfo , HrvRange , CurveData , ActivitiesWindow , BodyBattery } from '../model/Types';
 
 export class ApiError extends Error {
   code: number;
@@ -160,6 +160,12 @@ export class ApiClient {
     const txt = await ApiClient.authedGet('/garmin-dash/api/activities?days=' + days);
     const obj = JSON.parse(txt) as ActivitiesWindow;
     return obj.activities;
+  }
+
+  /** 身体电量（当日最高/最低）：后端走直连端点，summary 里那个字段恒为 null */
+  static async getBodyBattery(date: string): Promise<BodyBattery> {
+    const txt = await ApiClient.authedGet('/garmin-dash/api/body-battery?date=' + date);
+    return JSON.parse(txt) as BodyBattery;
   }
 
   private static async authedGet(path: string): Promise<string> {
