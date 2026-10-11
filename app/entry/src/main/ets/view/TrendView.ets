@@ -1,4 +1,5 @@
 import { common } from '@kit.AbilityKit';
+import { inputMethod } from '@kit.IMEKit';
 import { ApiClient } from '../service/ApiClient';
 import { DeviceStore } from '../service/DeviceStore';
 import { Activity, ActivityDetail, Summary, Trend, TrendPoint, WeeklyTotal , HrvRange , HrvDay , CurveData } from '../model/Types';
@@ -161,6 +162,8 @@ export struct TrendView {
   @State pCda: string = '0.30';
   @State pCrr: string = '0.005';
   @State pPower: string = '180';
+  /** 传动效率（%）：默认 97，链条传动典型 95~98 */
+  @State pEff: string = DeviceStore.getPredictEff().length > 0 ? DeviceStore.getPredictEff() : '97';
   /** 负荷明细表显示天数（10 ↔ 30 切换） */
   @State loadDays: number = 10;
   @State predReady: boolean = false;
@@ -1121,7 +1124,7 @@ export struct TrendView {
       Row() {
         Text('体重').fontSize(11).fontColor($r('app.color.text_secondary')).width(52)
         TextInput({ text: this.pWeight })
-          .fontSize(13).type(InputType.Number).layoutWeight(1).height(32)
+          .fontSize(13).type(InputType.Normal).layoutWeight(1).height(32)
           .backgroundColor($r('app.color.chip_background')).borderRadius(8)
           .onChange((v: string) => {
             this.pWeight = v;
@@ -1178,7 +1181,7 @@ export struct TrendView {
       Row() {
         Text('体重').fontSize(11).fontColor(COLOR_SECONDARY).width(52)
         TextInput({ text: this.pWeight })
-          .fontSize(13).type(InputType.Number).layoutWeight(1).height(32)
+          .fontSize(13).type(InputType.Normal).layoutWeight(1).height(32)
           .backgroundColor(COLOR_CHIP).borderRadius(8)
           .onChange((v: string) => { this.pWeight = v; })
         Text('kg').fontSize(10).fontColor(COLOR_HINT).width(26).textAlign(TextAlign.End)
@@ -1467,19 +1470,58 @@ export struct TrendView {
     DeviceStore.setPredictInputs(0, 0, this.numOf(this.pWeight, 75), 0, 0, 0, 0);
   }
 
+  /** 夹紧到合理区间（越界说明输入有误，例如 CdA 输成 30） */
+  private clampOf(v: number, lo: number, hi: number): number {
+    if (!Number.isFinite(v)) {
+      return lo;
+    }
+    if (v < lo) {
+      return lo;
+    }
+    if (v > hi) {
+      return hi;
+    }
+    return v;
+  }
+
+  /** 预测器输入的合理区间（用于提示） */
+  private predOutOfRange(): string {
+    const cda = this.clampOf(this.numOf(this.pCda, 0.30), 0.15, 0.70);
+    const crr = this.clampOf(this.numOf(this.pCrr, 0.005), 0.002, 0.020);
+    const w = this.numOf(this.pWeight, 75);
+    const out: string[] = [];
+    if (cda < 0.15 || cda > 0.70) {
+      out.push('风阻 CdA 应在 0.15~0.70（公路车≈0.30）');
+    }
+    if (crr < 0.002 || crr > 0.020) {
+      out.push('滚阻 Crr 应在 0.002~0.020（柏油≈0.005）');
+    }
+    if (w < 30 || w > 200) {
+      out.push('体重应在 30~200 kg');
+    }
+    return out.join('；');
+  }
+
+  /** 传动效率（0.80~1.00） */
+  private effOf(): number {
+    const e = this.clampOf(this.numOf(this.pEff, 97), 80, 100) / 100;
+    return e;
+  }
+
   private runPredict(): void {
-    const distKm = this.numOf(this.pDistance, 80);
+    const distKm = this.clampOf(this.numOf(this.pDistance, 80), 1, 1000);
     const climb = this.numOf(this.pClimb, 0);
-    const mass = this.numOf(this.pWeight, 75) + this.numOf(this.pBike, 12);
+    const mass = this.clampOf(this.numOf(this.pWeight, 75), 30, 200) + this.clampOf(this.numOf(this.pBike, 12), 5, 25);
     const cda = this.numOf(this.pCda, 0.30);
     const crr = this.numOf(this.pCrr, 0.005);
-    const power = this.numOf(this.pPower, 180);
+    const power = this.clampOf(this.numOf(this.pPower, 180), 50, 1500);
     if (distKm <= 0 || power <= 0) {
       this.predReady = false;
       return;
     }
     const grade = distKm > 0 ? (climb / (distKm * 1000)) * 100 : 0;
-    const v = this.solveSpeed(power, mass, grade, cda, crr);
+    // 输入功率要扣掉传动损耗，才是真正推动车的轮上功率
+    const v = this.solveSpeed(power * this.effOf(), mass, grade, cda, crr);
     this.predSpeed = Math.round(v * 3.6 * 10) / 10;
     this.predSeconds = Math.round((distKm * 1000) / v);
     // TSS 估算：IF = P / FTP，TSS = 秒 × P × IF / (FTP × 3600) × 100
@@ -1519,8 +1561,14 @@ export struct TrendView {
     Row() {
       Text(label).fontSize(11).fontColor($r('app.color.text_secondary')).width(88)
       TextInput({ text: value })
-        .fontSize(13).type(InputType.Number).layoutWeight(1).height(34)
+        .fontSize(13).type(InputType.Normal).layoutWeight(1).height(34)
         .backgroundColor($r('app.color.chip_background')).borderRadius(8)
+        .onSubmit(() => {
+          try {
+            inputMethod.getController().stopInputSession();
+          } catch (e) {
+          }
+        })
         .onChange((v: string) => {
           if (key === 'dist') { this.pDistance = v; }
           else if (key === 'climb') { this.pClimb = v; }
@@ -1528,7 +1576,11 @@ export struct TrendView {
           else if (key === 'bike') { this.pBike = v; }
           else if (key === 'cda') { this.pCda = v; }
           else if (key === 'crr') { this.pCrr = v; }
-          else { this.pPower = v; }
+          else if (key === 'power') { this.pPower = v; }
+          else {
+            this.pEff = v;
+            DeviceStore.setPredictEff(v);
+          }
         })
       Text(unit).fontSize(10).fontColor($r('app.color.text_hint')).width(34).textAlign(TextAlign.End)
     }
@@ -1843,10 +1895,18 @@ export struct TrendView {
         this.inputRow('风阻 CdA', this.pCda, 'm²', 'cda')
         this.inputRow('滚阻 Crr', this.pCrr, '', 'crr')
         this.inputRow('目标功率', this.pPower, 'W', 'power')
+        this.inputRow('传动效率', this.pEff, '%', 'eff')
         Row() {
           Button('计算').fontSize(13).height(36).layoutWeight(1)
             .backgroundColor($r('app.color.accent')).fontColor($r('app.color.accent_on'))
-            .onClick(() => { this.runPredict(); })
+            .onClick(() => {
+              this.runPredict();
+              // 收起输入法：计算完成后键盘不再占屏，方便看结果
+              try {
+                inputMethod.getController().stopInputSession();
+              } catch (e) {
+              }
+            })
         }
         .width('100%').margin({ top: 8 })
       }
@@ -1894,7 +1954,13 @@ export struct TrendView {
           }
           .width('100%').margin({ top: 4 })
 
-          Text('模型：P = (Crr·m·g·cosθ + m·g·sinθ + ½·ρ·CdA·v²)·v，ρ 取 1.225；'
+          Text('实际采用：CdA ' + this.clampOf(this.numOf(this.pCda, 0.30), 0.15, 0.70)
+            + ' · Crr ' + this.clampOf(this.numOf(this.pCrr, 0.005), 0.002, 0.020)
+            + ' · 总重 ' + (this.clampOf(this.numOf(this.pWeight, 75), 30, 200) + this.clampOf(this.numOf(this.pBike, 12), 5, 25)) + ' kg'
+            + ' · 传动效率 ' + Math.round(this.effOf() * 100) + '%'
+            + '　' + this.predOutOfRange())
+            .fontSize(9).fontColor(COLOR_HINT).width('100%').margin({ top: 6 })
+          Text('模型：P·η = (Crr·m·g·cosθ + m·g·sinθ + ½·ρ·CdA·v²)·v，ρ 取 1.225，η 为传动效率；'
             + '二分法解均速，假设全程匀速（起步与减速会使实际用时略长）。'
             + (this.e90 === null ? ' FTP 未取得则不做 TSS/分解。' : ' eFTP 取 ' + this.e90 + ' W。'))
             .fontSize(9).fontColor($r('app.color.text_hint')).width('100%').margin({ top: 8 })

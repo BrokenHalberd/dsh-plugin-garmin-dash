@@ -149,4 +149,14 @@ export class DeviceStore {
     s.putSync('bodyWeight', v);
     s.flush();
   }
+  // ── 表现预测器：传动效率（%，字符串保存）──
+  static getPredictEff(): string {
+    return DeviceStore.ensure().getSync('predictEff', '') as string;
+  }
+
+  static setPredictEff(v: string): void {
+    const s = DeviceStore.ensure();
+    s.putSync('predictEff', v);
+    s.flush();
+  }
 }

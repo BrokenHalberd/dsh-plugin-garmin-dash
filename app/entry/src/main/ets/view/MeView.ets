@@ -147,7 +147,7 @@ export struct MeView {
       Row() {
         Text('体重').fontSize(13).width(64)
         TextInput({ text: this.bodyWeight, placeholder: '例如 72.5' })
-          .fontSize(14).type(InputType.Number).layoutWeight(1).height(38)
+          .fontSize(14).type(InputType.Normal).layoutWeight(1).height(38)
           .backgroundColor($r('app.color.chip_background')).borderRadius(8)
           .onChange((v: string) => {
             this.bodyWeight = v;
