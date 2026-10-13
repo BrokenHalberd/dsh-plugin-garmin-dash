@@ -467,11 +467,11 @@ export struct StatusView {
       Text(this.bbSubText()).fontSize(9).fontColor($r('app.color.text_hint'))
     }
     .alignItems(HorizontalAlign.Start)
-    .layoutWeight(1)
-    .padding(12)
+    .width('48%')
+    .padding(14)
     .backgroundColor($r('app.color.card_background_blur'))
     .border({ width: 1, color: $r('app.color.card_border_highlight') })
-    .borderRadius(12)
+    .borderRadius(14)
   }
 
   @Builder

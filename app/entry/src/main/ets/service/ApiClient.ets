@@ -4,7 +4,7 @@
  */
 import { http } from '@kit.NetworkKit';
 import { DeviceStore } from './DeviceStore';
-import { Summary, Activity, ActivityDetail, Trend, PairResult, DshLink, ChatReply , HrvInfo , HrvRange , CurveData , ActivitiesWindow , BodyBattery } from '../model/Types';
+import { Summary, Activity, ActivityDetail, Trend, PairResult, DshLink, ChatReply , HrvInfo , HrvRange , CurveData , ActivitiesWindow , BodyBattery , RouteData } from '../model/Types';
 
 export class ApiError extends Error {
   code: number;
@@ -166,6 +166,12 @@ export class ApiClient {
   static async getBodyBattery(date: string): Promise<BodyBattery> {
     const txt = await ApiClient.authedGet('/garmin-dash/api/body-battery?date=' + date);
     return JSON.parse(txt) as BodyBattery;
+  }
+
+  /** 路线（后端抽稀后一次返回，缓存 6 小时） */
+  static async getRoute(id: number, points: number): Promise<RouteData> {
+    const txt = await ApiClient.authedGet('/garmin-dash/api/route?id=' + id + '&points=' + points);
+    return JSON.parse(txt) as RouteData;
   }
 
   private static async authedGet(path: string): Promise<string> {

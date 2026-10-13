@@ -1,10 +1,13 @@
 import { router } from '@kit.ArkUI';
 import { ApiClient } from '../service/ApiClient';
 import { DeviceStore } from '../service/DeviceStore';
-import { Activity, ActivityDetail } from '../model/Types';
+import { Activity, ActivityDetail , RouteData, RoutePoint , CurveData } from '../model/Types';
 import { Fmt } from '../util/Format';
 import { Theme } from '../util/Theme';
 import { common } from '@kit.AbilityKit';
+import { MapComponent, mapCommon, map } from '@kit.MapKit';
+import { AsyncCallback } from '@kit.BasicServicesKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 /** 完整详情：基础字段 + 功率曲线（1s~5h）+ 功率/心率区间 */
 interface DetailFull extends ActivityDetail {
   maxAvgPower_1?: number;
@@ -53,6 +56,13 @@ struct ActivityDetailPage {
   @State err: string = '';
   /** 系统深浅色：Canvas 取色用 */
   @State dark: boolean = false;
+  @State route: RouteData | null = null;
+  @State routeMode: string = 'power';
+  @State routeErr: string = '';
+  @State mapReady: boolean = false;
+  private mapOptions?: mapCommon.MapOptions;
+  private mapCallback?: AsyncCallback<map.MapComponentController>;
+  private mapController?: map.MapComponentController;
   @State staleNote: string = '';
   // ── 曲线对比与派生指标（Intervals.icu 风格）──
   @State bestCurve: number[] = [];
@@ -70,8 +80,25 @@ struct ActivityDetailPage {
   /** 系统字体缩放（无障碍字号） */
   private fontScale: number = 1;
 
+  private routeSettings: RenderingContextSettings = new RenderingContextSettings(true);
+  private routeCtx: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.routeSettings);
   private settings: RenderingContextSettings = new RenderingContextSettings(true);
   private ctx: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.settings);
+  onPageHide(): void {
+    if (this.mapController) {
+      this.mapController.hide();
+    }
+  }
+
+  onPageShow(): void {
+    if (this.mapController) {
+      this.mapController.show();
+    }
+    if (this.route === null) {
+      this.loadRoute();
+    }
+  }
+
   aboutToAppear(): void {
     this.dark = Theme.isDark(getContext(this) as common.UIAbilityContext);
     // 跟随系统字体缩放（无障碍字号）：Canvas 文字不会自动继承，需手动读取
@@ -84,6 +111,8 @@ struct ActivityDetailPage {
     const params = router.getParams() as Record<string, number>;
     if (params !== null && params !== undefined) {
       this.activityId = params.id as number;
+    // 轨迹要在拿到 activityId 之后再取（之前放在 aboutToAppear 开头，id 还是 0 → 一直"读取中"）
+    this.loadRoute();
     }
     this.load();
   }
@@ -117,17 +146,13 @@ struct ActivityDetailPage {
       });
   }
   /** 功率曲线：横轴对数（1s → 5h） */
+  /** 对比图专用：15 档时长（配合 curveValueAny 使用） */
+  private cmpPoints(): number[] {
+    return [1, 2, 5, 10, 20, 30, 60, 120, 300, 600, 1200, 1800, 3600, 7200, 18000];
+  }
+
   private curvePoints(): number[] {
-    const d = this.detail;
-    if (d === null) {
-      return [];
-    }
-    const keys: number[] = [1, 2, 5, 10, 20, 30, 60, 120, 300, 600, 1200, 1800, 3600, 7200, 18000];
-    const vals: number[] = [];
-    for (let i = 0; i < keys.length; i++) {
-      vals.push(this.curveValue(keys[i]));
-    }
-    return vals;
+    return [1, 5, 60, 300, 1200];
   }
   private curveValue(sec: number): number {
     const d = this.detail;
@@ -153,7 +178,11 @@ struct ActivityDetailPage {
     return v === undefined || v === null ? 0 : v;
   }
   private drawCurve(): void {
-    const vals = this.curvePoints();
+    const secsAll: number[] = [1, 2, 5, 10, 20, 30, 60, 120, 300, 600, 1200, 1800, 3600, 7200, 18000];
+    const vals: number[] = [];
+    for (let i = 0; i < secsAll.length; i++) {
+      vals.push(this.curveValueAny(secsAll[i]));
+    }
     if (vals.length === 0) {
       return;
     }
@@ -230,7 +259,7 @@ struct ActivityDetailPage {
     }
     this.ctx.fillStyle = Theme.text(this.dark);
     this.ctx.font = '10px sans-serif';
-    this.ctx.fillText('峰值 ' + Math.round(vals[bestIdx]) + ' W', padL + 2, padT + 10);
+    this.ctx.fillText('峰值 ' + Math.round(max) + ' W', padL + 2, padT + 10);
   }
   @Builder
   row(label: string, value: string) {
@@ -360,8 +389,77 @@ struct ActivityDetailPage {
   }
 
   /** 由某条曲线推算 eFTP（20 分钟 × 0.95） */
+  /** 读 detail 里任意时长的最佳平均功率（15 档） */
+  private curveValueAny(sec: number): number {
+    const d = this.detail;
+    if (d === null) {
+      return 0;
+    }
+    if (sec === 1) {
+      const v = d.maxAvgPower_1;
+      return v === undefined || v === null ? 0 : v;
+    }
+    if (sec === 2) {
+      const v = d.maxAvgPower_2;
+      return v === undefined || v === null ? 0 : v;
+    }
+    if (sec === 5) {
+      const v = d.maxAvgPower_5;
+      return v === undefined || v === null ? 0 : v;
+    }
+    if (sec === 10) {
+      const v = d.maxAvgPower_10;
+      return v === undefined || v === null ? 0 : v;
+    }
+    if (sec === 20) {
+      const v = d.maxAvgPower_20;
+      return v === undefined || v === null ? 0 : v;
+    }
+    if (sec === 30) {
+      const v = d.maxAvgPower_30;
+      return v === undefined || v === null ? 0 : v;
+    }
+    if (sec === 60) {
+      const v = d.maxAvgPower_60;
+      return v === undefined || v === null ? 0 : v;
+    }
+    if (sec === 120) {
+      const v = d.maxAvgPower_120;
+      return v === undefined || v === null ? 0 : v;
+    }
+    if (sec === 300) {
+      const v = d.maxAvgPower_300;
+      return v === undefined || v === null ? 0 : v;
+    }
+    if (sec === 600) {
+      const v = d.maxAvgPower_600;
+      return v === undefined || v === null ? 0 : v;
+    }
+    if (sec === 1200) {
+      const v = d.maxAvgPower_1200;
+      return v === undefined || v === null ? 0 : v;
+    }
+    if (sec === 1800) {
+      const v = d.maxAvgPower_1800;
+      return v === undefined || v === null ? 0 : v;
+    }
+    if (sec === 3600) {
+      const v = d.maxAvgPower_3600;
+      return v === undefined || v === null ? 0 : v;
+    }
+    if (sec === 7200) {
+      const v = d.maxAvgPower_7200;
+      return v === undefined || v === null ? 0 : v;
+    }
+    if (sec === 18000) {
+      const v = d.maxAvgPower_18000;
+      return v === undefined || v === null ? 0 : v;
+    }
+    return 0;
+  }
+
   private eftpOf(pts: number[]): number | null {
-    const secs = this.curvePoints();
+    const secs = this.cmpPoints();
     for (let i = 0; i < secs.length; i++) {
       if (secs[i] === 1200 && i < pts.length && pts[i] > 0) {
         return Math.round(pts[i] * 0.95);
@@ -386,63 +484,36 @@ struct ActivityDetailPage {
   }
 
   /** 载入「近 90 天最佳曲线」（按钮触发；命中缓存则不请求） */
+  /**
+   * 近 90 天最佳：直接用后端聚合好的 /api/curve（一次请求）。
+   * 早先版本在手机端自己拉活动 + 逐个取详情，失败被静默吞掉 →
+   * 表现为「eFTP 一直待加载、点对比只有本次曲线」。
+   */
   private loadComparison(): void {
-    if (this.cmpLoading) return;
-    const key = 'curveBest:90';
-    const cached = DeviceStore.cacheGet(key);
-    if (cached.length > 10 && DeviceStore.cacheAge(key) < 86400000) {
-      this.applyComparison(cached);
+    if (this.cmpLoading) {
       return;
     }
-    if (!DeviceStore.isPaired()) { this.cmpErr = '尚未配对'; return; }
+    const key = 'cmp:curve90';
+    const cached = DeviceStore.cacheGet(key);
+    if (cached.length > 10 && DeviceStore.cacheAge(key) < 3600000) {
+      try {
+        this.applyCurve90(JSON.parse(cached) as CurveData);
+        return;
+      } catch (e) {
+        this.cmpErr = '缓存解析失败，正在重取';
+      }
+    }
+    if (!DeviceStore.isPaired()) {
+      this.cmpErr = '尚未配对';
+      return;
+    }
     this.cmpLoading = true;
     this.cmpErr = '';
-    const secs = this.curvePoints();
-    const cutoff = Fmt.shiftDays(Fmt.today(), -90);
-    ApiClient.getActivities(30, 0)
-      .then((list: Activity[]) => {
-        const picks: number[] = [];
-        for (let i = 0; i < list.length && picks.length < 10; i++) {
-          const a = list[i];
-          const d10 = a.startTime.length >= 10 ? a.startTime.substring(0, 10) : '';
-          if (d10 < cutoff) continue;
-          if (a.normPower === null || a.avgPower === null) continue;
-          picks.push(a.id);
-        }
-        if (picks.length === 0) {
-          this.cmpLoading = false;
-          this.cmpErr = '近 90 天没有带功率的活动';
-          return;
-        }
-        const best: number[] = [];
-        for (let k = 0; k < secs.length; k++) best.push(0);
-        let idx = 0;
-        const step = () => {
-          if (idx >= picks.length) {
-            const payload: CurveBest = { pts: best, count: picks.length, eftp: this.eftpOf(best) };
-            DeviceStore.cachePut(key, JSON.stringify(payload));
-            this.bestCurve = best;
-            this.cmpCount = picks.length;
-            this.eftpBest = payload.eftp;
-            this.cmpReady = true;
-            this.cmpLoading = false;
-            this.drawComparison();
-            return;
-          }
-          const id = picks[idx];
-          idx++;
-          ApiClient.getActivityDetail(id)
-            .then((d: ActivityDetail) => {
-              const full = d as DetailFull;
-              for (let k = 0; k < secs.length; k++) {
-                const v = this.curveValueOf(full, secs[k]);
-                if (v > best[k]) best[k] = v;
-              }
-            })
-            .catch(() => { })
-            .then(() => { step(); });
-        };
-        step();
+    ApiClient.getCurve(90)
+      .then((c: CurveData) => {
+        DeviceStore.cachePut(key, JSON.stringify(c));
+        this.cmpLoading = false;
+        this.applyCurve90(c);
       })
       .catch((e: Object) => {
         this.cmpLoading = false;
@@ -450,7 +521,24 @@ struct ActivityDetailPage {
       });
   }
 
-  /** 画「本次 vs 近 90 天最佳」对比图 */
+  /** 后端 15 档 → 本页 5 档（1/5/60/300/1200 秒，顺序必须与 curvePoints 一致） */
+  private applyCurve90(c: CurveData): void {
+    if (c.error !== undefined && c.error !== null) {
+      this.cmpErr = '后端聚合失败：' + c.error;
+      return;
+    }
+    const pts: number[] = [];
+    for (let i = 0; i < 15; i++) {
+      pts.push(c.p90.length > i ? c.p90[i] : 0);
+    }
+    this.bestCurve = pts;
+    this.cmpCount = c.count;
+    this.eftpBest = c.e90;
+    this.cmpReady = true;
+    this.cmpErr = '';
+    this.drawComparison();
+  }
+
   private drawComparison(): void {
     const d = this.detail;
     if (d === null || this.bestCurve.length === 0) return;
@@ -461,7 +549,7 @@ struct ActivityDetailPage {
     const mine: number[] = [];
     let max = 10;
     for (let i = 0; i < secs.length; i++) {
-      const v = this.curveValue(secs[i]);
+      const v = this.curveValueAny(secs[i]);
       mine.push(v);
       if (v > max) max = v;
       if (i < this.bestCurve.length && this.bestCurve[i] > max) max = this.bestCurve[i];
@@ -527,6 +615,317 @@ struct ActivityDetailPage {
     if (base > 20) base = 20;
     const scaled = Math.round(base * this.fontScale);
     return scaled < 10 ? 10 : scaled;
+  }
+
+  /** 载入路线（缓存 6 小时；无 GPS 的活动会返回 available=false） */
+  private loadRoute(): void {
+    const id = this.activityId;
+    if (id <= 0) {
+      return;
+    }
+    const key = 'route:' + id;
+    const cached = DeviceStore.cacheGet(key);
+    if (cached.length > 10) {
+      this.applyRoute(cached);
+      return;
+    }
+    ApiClient.getRoute(id, 600)
+      .then((r: RouteData) => {
+        this.applyRoute(JSON.stringify(r));
+        if (r.available) {
+          DeviceStore.cachePut(key, JSON.stringify(r));
+        }
+      })
+      .catch((e: Object) => {
+        this.routeErr = ApiClient.friendly(e);
+      });
+  }
+
+  private applyRoute(json: string): void {
+    try {
+      const r = JSON.parse(json) as RouteData;
+      this.route = r;
+      this.routeErr = r.available ? '' : (r.reason === 'no_gps' ? '该活动没有轨迹数据（室内/无 GPS）' : '轨迹读取失败');
+      if (r.available) {
+        this.buildMapOptions();
+      }
+    } catch (e) {
+      this.routeErr = '轨迹数据解析失败';
+    }
+  }
+
+  /** 投影经纬度 → 画布坐标（按纬度做 cos 修正，等比居中） */
+  private drawRoute(): void {
+    const r = this.route;
+    if (r === null || !r.available || r.points.length < 2) {
+      return;
+    }
+    const w = this.routeCtx.width;
+    const h = this.routeCtx.height;
+    if (w <= 0 || h <= 0) {
+      return;
+    }
+    const font = this.labelSize(w);
+    const pad = 12;
+    const midLat = (r.bounds.minLat + r.bounds.maxLat) / 2;
+    const kx = Math.cos(midLat * Math.PI / 180);
+    const spanLat = Math.max(1e-6, r.bounds.maxLat - r.bounds.minLat);
+    const spanLon = Math.max(1e-6, (r.bounds.maxLon - r.bounds.minLon) * kx);
+    const scale = Math.min((w - pad * 2) / spanLon, (h - pad * 2) / spanLat);
+    const offX = (w - spanLon * scale) / 2;
+    const offY = (h - spanLat * scale) / 2;
+    const px = (lon: number) => offX + (lon - r.bounds.minLon) * kx * scale;
+    const py = (lat: number) => h - offY - (lat - r.bounds.minLat) * scale;
+
+    this.routeCtx.clearRect(0, 0, w, h);
+    const usePower = this.routeMode === 'power';
+    const vmax = usePower ? (r.stats.powerMax === null ? 1 : r.stats.powerMax) : (r.stats.speedMax === null ? 1 : r.stats.speedMax * 3.6);
+    const colors: string[] = ['#8A93A5', '#2E9BB5', '#2FA36B', '#E0A33E', '#D9534F'];
+    const seg = (a: RoutePoint, b: RoutePoint, color: string) => {
+      this.routeCtx.strokeStyle = color;
+      this.routeCtx.lineWidth = 3.2;
+      this.routeCtx.beginPath();
+      this.routeCtx.moveTo(px(a.lon), py(a.lat));
+      this.routeCtx.lineTo(px(b.lon), py(b.lat));
+      this.routeCtx.stroke();
+    };
+    for (let i = 1; i < r.points.length; i++) {
+      const a = r.points[i - 1];
+      const b = r.points[i];
+      let v = 0;
+      if (usePower) {
+        v = b.power === null ? 0 : b.power;
+      } else {
+        v = b.speed === null ? 0 : b.speed * 3.6;
+      }
+      let band = 0;
+      if (vmax > 0) {
+        band = Math.min(4, Math.floor((v / vmax) * 5));
+      }
+      if (v <= 0) {
+        band = 0;
+      }
+      seg(a, b, colors[band]);
+    }
+    // 起终点
+    const s = r.points[0];
+    const e = r.points[r.points.length - 1];
+    this.routeCtx.fillStyle = '#2FA36B';
+    this.routeCtx.beginPath();
+    this.routeCtx.arc(px(s.lon), py(s.lat), 5, 0, 6.283);
+    this.routeCtx.fill();
+    this.routeCtx.fillStyle = '#D9534F';
+    this.routeCtx.beginPath();
+    this.routeCtx.arc(px(e.lon), py(e.lat), 5, 0, 6.283);
+    this.routeCtx.fill();
+    // 标尺
+    this.routeCtx.fillStyle = Theme.axis(this.dark);
+    this.routeCtx.font = font + 'px sans-serif';
+    this.routeCtx.fillText(usePower ? '按功率着色' : '按速度着色', pad, h - 4);
+  }
+
+  /** 由轨迹范围生成地图初始化参数（中心点 + 估算层级） */
+  private buildMapOptions(): void {
+    const r = this.route;
+    if (r === null || !r.available || r.points.length === 0) {
+      return;
+    }
+    const cLat = (r.bounds.minLat + r.bounds.maxLat) / 2;
+    const cLon = (r.bounds.minLon + r.bounds.maxLon) / 2;
+    const spanLon = Math.max(0.002, r.bounds.maxLon - r.bounds.minLon);
+    let z = Math.log2(360 / spanLon) - 1;
+    if (z < 8) {
+      z = 8;
+    }
+    if (z > 17) {
+      z = 17;
+    }
+    this.mapOptions = {
+      position: {
+        target: this.wgs84ToGcj02(cLat, cLon),
+        zoom: Math.round(z)
+      },
+      dayNightMode: mapCommon.DayNightMode.AUTO,
+      scaleControlsEnabled: true,
+      myLocationControlsEnabled: false,
+      zoomControlsEnabled: false
+    };
+    this.mapCallback = (err: BusinessError, controller: map.MapComponentController) => {
+      if (err) {
+        return;
+      }
+      this.mapController = controller;
+      this.mapReady = true;
+      this.drawMapPolylines();
+    };
+  }
+
+  /**
+   * WGS-84 → GCJ-02（国测局火星坐标）。
+   * Garmin 记录的是 WGS-84；华为地图在国内显示 GCJ-02，直接用原始坐标会整体偏移。
+   * 仅用于画到地图上的点，后端与本地存储仍保持 WGS-84 原值。
+   */
+  private wgs84ToGcj02(lat: number, lon: number): mapCommon.LatLng {
+    if (lon < 72.004 || lon > 137.8347 || lat < 0.8293 || lat > 55.8271) {
+      return { latitude: lat, longitude: lon };
+    }
+    const a = 6378245.0;
+    const ee = 0.00669342162296594323;
+    const dLat0 = this.tfLat(lon - 105.0, lat - 35.0);
+    const dLon0 = this.tfLon(lon - 105.0, lat - 35.0);
+    const radLat = lat / 180.0 * Math.PI;
+    let magic = Math.sin(radLat);
+    magic = 1 - ee * magic * magic;
+    const sqrtMagic = Math.sqrt(magic);
+    const dLat = (dLat0 * 180.0) / ((a * (1 - ee)) / (magic * sqrtMagic) * Math.PI);
+    const dLon = (dLon0 * 180.0) / (a / sqrtMagic * Math.cos(radLat) * Math.PI);
+    return { latitude: lat + dLat, longitude: lon + dLon };
+  }
+
+  private tfLat(x: number, y: number): number {
+    let ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+    ret += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0 / 3.0;
+    ret += (20.0 * Math.sin(y * Math.PI) + 40.0 * Math.sin(y / 3.0 * Math.PI)) * 2.0 / 3.0;
+    ret += (160.0 * Math.sin(y / 12.0 * Math.PI) + 320.0 * Math.sin(y * Math.PI / 30.0)) * 2.0 / 3.0;
+    return ret;
+  }
+
+  private tfLon(x: number, y: number): number {
+    let ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+    ret += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0 / 3.0;
+    ret += (20.0 * Math.sin(x * Math.PI) + 40.0 * Math.sin(x / 3.0 * Math.PI)) * 2.0 / 3.0;
+    ret += (150.0 * Math.sin(x / 12.0 * Math.PI) + 300.0 * Math.sin(x / 30.0 * Math.PI)) * 2.0 / 3.0;
+    return ret;
+  }
+
+  /** 按颜色把轨迹归并成若干段折线（5~10 段，而不是逐点画） */
+  private drawMapPolylines(): void {
+    const r = this.route;
+    const ctl = this.mapController;
+    if (r === null || ctl === undefined || !r.available || r.points.length < 2) {
+      return;
+    }
+    // 切换功率/速度前先清掉上一次的折线（地图上只放了折线，clear 是安全的）
+    ctl.clear();
+    const usePower = this.routeMode === 'power';
+    const vmax = usePower
+      ? (r.stats.powerMax === null ? 1 : r.stats.powerMax)
+      : (r.stats.speedMax === null ? 1 : r.stats.speedMax * 3.6);
+    const colors: number[] = [0xFF8A93A5, 0xFF2E9BB5, 0xFF2FA36B, 0xFFE0A33E, 0xFFD9534F];
+    let seg: mapCommon.LatLng[] = [];
+    let curBand = -1;
+    const flush = (pts: mapCommon.LatLng[], band: number) => {
+      if (pts.length < 2 || band < 0) {
+        return;
+      }
+      const opt: mapCommon.MapPolylineOptions = { points: pts, color: colors[band] };
+      ctl.addPolyline(opt).catch(() => { });
+    };
+    for (let i = 0; i < r.points.length; i++) {
+      const pt = r.points[i];
+      let v = 0;
+      if (usePower) {
+        v = pt.power === null ? 0 : pt.power;
+      } else {
+        v = pt.speed === null ? 0 : pt.speed * 3.6;
+      }
+      let band = vmax > 0 ? Math.min(4, Math.floor((v / vmax) * 5)) : 0;
+      if (v <= 0) {
+        band = 0;
+      }
+      const ll: mapCommon.LatLng = this.wgs84ToGcj02(pt.lat, pt.lon);
+      if (band !== curBand) {
+        if (seg.length > 0) {
+          seg.push(ll);
+          flush(seg, curBand);
+        }
+        seg = [ll];
+        curBand = band;
+      } else {
+        seg.push(ll);
+      }
+    }
+    flush(seg, curBand);
+    // 起终点标记（绿=起点，红=终点）
+    const first = r.points[0];
+    const last = r.points[r.points.length - 1];
+    const startOpt: mapCommon.MarkerOptions = {
+      position: this.wgs84ToGcj02(first.lat, first.lon),
+      icon: $r('app.media.route_start'),
+      anchorU: 0.5,
+      anchorV: 0.5,
+      title: '起点'
+    };
+    const endOpt: mapCommon.MarkerOptions = {
+      position: this.wgs84ToGcj02(last.lat, last.lon),
+      icon: $r('app.media.route_end'),
+      anchorU: 0.5,
+      anchorV: 0.5,
+      title: '终点'
+    };
+    ctl.addMarker(startOpt).catch(() => { });
+    ctl.addMarker(endOpt).catch(() => { });
+  }
+
+  @Builder
+  routeCard() {
+    Column() {
+      Row() {
+        Text('路线').fontSize(13).fontWeight(FontWeight.Medium)
+        Blank()
+        Row({ space: 8 }) {
+          Text('功率').fontSize(11)
+            .fontColor(this.routeMode === 'power' ? $r('app.color.accent_on') : $r('app.color.text_secondary'))
+            .backgroundColor(this.routeMode === 'power' ? $r('app.color.accent') : $r('app.color.chip_background'))
+            .padding({ left: 10, right: 10, top: 4, bottom: 4 }).borderRadius(12)
+            .onClick(() => { this.routeMode = 'power'; this.drawRoute(); this.drawMapPolylines(); })
+          Text('速度').fontSize(11)
+            .fontColor(this.routeMode === 'speed' ? $r('app.color.accent_on') : $r('app.color.text_secondary'))
+            .backgroundColor(this.routeMode === 'speed' ? $r('app.color.accent') : $r('app.color.chip_background'))
+            .padding({ left: 10, right: 10, top: 4, bottom: 4 }).borderRadius(12)
+            .onClick(() => { this.routeMode = 'speed'; this.drawRoute(); this.drawMapPolylines(); })
+        }
+      }
+      .width('100%')
+
+      if (this.route !== null && this.route.available) {
+        if (this.mapOptions !== undefined) {
+          MapComponent({ mapOptions: this.mapOptions, mapCallback: this.mapCallback })
+            .width('100%').height(280).margin({ top: 8 }).borderRadius(12)
+        } else {
+          Row() {
+            LoadingProgress().width(20).height(20)
+            Text('地图加载中…').fontSize(11).fontColor($r('app.color.text_tertiary')).margin({ left: 8 })
+          }
+          .height(280).width('100%').justifyContent(FlexAlign.Center)
+        }
+
+        // 地图就绪后只显示地图；未就绪时才用 Canvas 轨迹兜底
+        if (!this.mapReady) {
+          Canvas(this.routeCtx)
+            .width('100%').height(240).margin({ top: 8 })
+            .onReady(() => { this.drawRoute(); })
+            .backgroundColor($r('app.color.card_background_blur'))
+            .borderRadius(12)
+        }
+        Row() {
+          Text('绿点 起点 · 红点 终点 · 共 ' + this.route.rawPoints + ' 点（抽稀 ' + this.route.points.length + '）')
+            .fontSize(9).fontColor($r('app.color.text_hint')).layoutWeight(1)
+        }
+        .width('100%').margin({ top: 6 })
+        Text('峰值功率 ' + (this.route.stats.powerMax === null ? '--' : '' + this.route.stats.powerMax + ' W')
+          + ' · 平均 ' + (this.route.stats.powerAvg === null ? '--' : '' + this.route.stats.powerAvg + ' W')
+          + ' · 峰值速度 ' + (this.route.stats.speedMax === null ? '--' : (this.route.stats.speedMax * 3.6).toFixed(1) + ' km/h'))
+          .fontSize(10).fontColor($r('app.color.text_secondary')).width('100%').margin({ top: 4 })
+      } else {
+        Text(this.routeErr.length > 0 ? this.routeErr : '轨迹读取中…')
+          .fontSize(11).fontColor($r('app.color.text_hint')).width('100%').margin({ top: 8 })
+      }
+    }
+    .padding(14).width('100%').margin({ top: 10 })
+    .backgroundColor($r('app.color.card_background_blur'))
+    .border({ width: 1, color: $r('app.color.card_border_highlight') })
+    .borderRadius(14)
   }
 
   build() {
@@ -669,6 +1068,11 @@ struct ActivityDetailPage {
                   .fontSize(9).fontColor($r('app.color.text_hint')).width('100%').margin({ top: 6 })
 
                 if (this.cmpReady) {
+          Row() {
+            Row().width(10).height(2).backgroundColor($r('app.color.accent'))
+            Text(' 本次骑行（各时长最佳功率 W）').fontSize(10).fontColor($r('app.color.text_tertiary'))
+          }
+          .width('100%')
                   Canvas(this.cmpCtx)
                     .width('100%').height(150).margin({ top: 10 })
                     .onReady(() => { this.drawComparison(); })
@@ -679,13 +1083,13 @@ struct ActivityDetailPage {
                     }
                     Row() {
                       Row().width(10).height(2).backgroundColor('#8E5BD9')
-                      Text(' 近90天最佳（' + this.cmpCount + ' 次）').fontSize(10).fontColor($r('app.color.text_tertiary'))
+                      Text(' 近90天最佳（' + this.cmpCount + ' 次骑行）').fontSize(10).fontColor($r('app.color.text_tertiary'))
                     }
                   }
                   .width('100%').margin({ top: 6 })
                 } else {
                   Row() {
-                    Text(this.cmpErr.length > 0 ? this.cmpErr : '对比近 90 天最佳曲线（最多取 10 次带功率的活动）')
+                    Text(this.cmpErr.length > 0 ? this.cmpErr : '口径说明：两条线都是「功率(W) vs 时长」，本次=这次骑行的各时长最佳平均功率，最佳=近90天所有骑行的同口径最佳值；上方的 eFTP 是 20 分钟值 × 0.95 的派生指标')
                       .fontSize(11).fontColor($r('app.color.text_secondary')).layoutWeight(1)
                     Button(this.cmpLoading ? '加载中…' : '开始对比')
                       .fontSize(12).height(30)
@@ -701,7 +1105,9 @@ struct ActivityDetailPage {
               .border({ width: 1, color: $r('app.color.card_border_highlight') })
               .borderRadius(14)
             }
-            Row().height(96 + this.bottomInset)
+            this.routeCard()
+
+        Row().height(96 + this.bottomInset)
           }
           .width('100%')
         }

@@ -170,3 +170,39 @@ export interface BodyBattery {
   low: number | null;
   reason: string | null;
 }
+
+/** 轨迹点（抽稀后） */
+export interface RoutePoint {
+  lat: number;
+  lon: number;
+  speed: number | null;
+  power: number | null;
+  hr: number | null;
+  dist: number | null;
+}
+
+/** 路线数据 */
+export interface RouteData {
+  available: boolean;
+  id: number;
+  rawPoints: number;
+  points: RoutePoint[];
+  bounds: RouteBounds;
+  stats: RouteStats;
+  reason: string | null;
+}
+
+export interface RouteBounds {
+  minLat: number;
+  maxLat: number;
+  minLon: number;
+  maxLon: number;
+}
+
+export interface RouteStats {
+  speedMin: number | null;
+  speedMax: number | null;
+  powerMin: number | null;
+  powerMax: number | null;
+  powerAvg: number | null;
+}
