@@ -43,6 +43,7 @@ export struct StatusView {
   @State ctl: number | null = null;
   @State atl: number | null = null;
   @State ramp: number | null = null;
+  @State formErr: string = '';
   @State hrv: HrvInfo | null = null;
   @State hrvErr: string = '';
   @State bb: BodyBattery | null = null;
@@ -55,6 +56,7 @@ export struct StatusView {
 
   onTick(): void {
     this.load(false);
+    this.loadForm();
   }
 
   private isToday(): boolean {
@@ -564,7 +566,9 @@ export struct StatusView {
 
       })
 
-      .catch((e: Object) => { });
+      .catch((e: Object) => {
+        this.formErr = ApiClient.friendly(e);
+      });
 
   }
 

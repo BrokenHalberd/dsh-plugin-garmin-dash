@@ -1,7 +1,7 @@
 import { router } from '@kit.ArkUI';
 import { ApiClient } from '../service/ApiClient';
 import { DeviceStore } from '../service/DeviceStore';
-import { Activity, ActivityDetail , RouteData, RoutePoint , CurveData } from '../model/Types';
+import { Activity, ActivityDetail , RouteData, RoutePoint , CurveData , ClimbSeg } from '../model/Types';
 import { Fmt } from '../util/Format';
 import { Theme } from '../util/Theme';
 import { common } from '@kit.AbilityKit';
@@ -82,6 +82,10 @@ struct ActivityDetailPage {
 
   private routeSettings: RenderingContextSettings = new RenderingContextSettings(true);
   private routeCtx: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.routeSettings);
+  private elevSettings: RenderingContextSettings = new RenderingContextSettings(true);
+  private elevCtx: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.elevSettings);
+  private hrSettings: RenderingContextSettings = new RenderingContextSettings(true);
+  private hrCtx: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.hrSettings);
   private settings: RenderingContextSettings = new RenderingContextSettings(true);
   private ctx: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.settings);
   onPageHide(): void {
@@ -623,9 +627,9 @@ struct ActivityDetailPage {
     if (id <= 0) {
       return;
     }
-    const key = 'route:' + id;
+    const key = 'route:v2:' + id;
     const cached = DeviceStore.cacheGet(key);
-    if (cached.length > 10) {
+    if (cached.length > 10 && DeviceStore.cacheAge('route:v2:' + id) < 3600000) {
       this.applyRoute(cached);
       return;
     }
@@ -648,6 +652,8 @@ struct ActivityDetailPage {
       this.routeErr = r.available ? '' : (r.reason === 'no_gps' ? '该活动没有轨迹数据（室内/无 GPS）' : '轨迹读取失败');
       if (r.available) {
         this.buildMapOptions();
+        this.drawElev();
+        this.drawHr();
       }
     } catch (e) {
       this.routeErr = '轨迹数据解析失败';
@@ -867,6 +873,340 @@ struct ActivityDetailPage {
     ctl.addMarker(endOpt).catch(() => { });
   }
 
+  /** 通用折线：vals 中 NaN 自动断开 */
+  private drawSeries(ctx: CanvasRenderingContext2D, vals: number[], color: string, unit: string): void {
+    const w = ctx.width;
+    const h = ctx.height;
+    if (w <= 0 || h <= 0) {
+      return;
+    }
+    let lo = 1e9;
+    let hi = -1e9;
+    for (let i = 0; i < vals.length; i++) {
+      const v = vals[i];
+      if (!Number.isNaN(v)) {
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+      }
+    }
+    if (hi <= lo) {
+      return;
+    }
+    const font = this.labelSize(w);
+    const padL = Math.round(font * 2.6) + 4;
+    const padR = 8;
+    const padT = 10;
+    const padB = font + 10;
+    const iw = w - padL - padR;
+    const ih = h - padT - padB;
+    const span = hi - lo;
+    ctx.clearRect(0, 0, w, h);
+    ctx.font = font + 'px sans-serif';
+    ctx.strokeStyle = Theme.grid(this.dark);
+    ctx.lineWidth = 1;
+    ctx.fillStyle = Theme.axis(this.dark);
+    const ticks: number[] = [hi, lo];
+    for (let t = 0; t < ticks.length; t++) {
+      const yy = padT + ih - ((ticks[t] - lo) / span) * ih;
+      ctx.beginPath();
+      ctx.moveTo(padL, yy);
+      ctx.lineTo(padL + iw, yy);
+      ctx.stroke();
+      ctx.fillText(Math.round(ticks[t]) + unit, Math.round(font * 0.15), yy + Math.round(font * 0.35));
+    }
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < vals.length; i++) {
+      const v = vals[i];
+      if (Number.isNaN(v)) {
+        continue;
+      }
+      const px = padL + (i / (vals.length - 1)) * iw;
+      const py = padT + ih - ((v - lo) / span) * ih;
+      if (!started) {
+        ctx.moveTo(px, py);
+        started = true;
+      } else {
+        ctx.lineTo(px, py);
+      }
+    }
+    ctx.stroke();
+  }
+
+  private drawElev(): void {
+    const r = this.route;
+    if (r === null || !r.available || r.points.length < 3) {
+      return;
+    }
+    const vals: number[] = [];
+    for (let i = 0; i < r.points.length; i++) {
+      const v = r.points[i].elev;
+      vals.push(v === undefined || v === null ? NaN : v);
+    }
+    const ctx = this.elevCtx;
+    const w = ctx.width;
+    const h = ctx.height;
+    if (w <= 0 || h <= 0) {
+      return;
+    }
+    let lo = 1e9;
+    let hi = -1e9;
+    for (let i = 0; i < vals.length; i++) {
+      const v = vals[i];
+      if (!Number.isNaN(v)) {
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+      }
+    }
+    if (hi <= lo) {
+      return;
+    }
+    const font = this.labelSize(w);
+    const padL = Math.round(font * 2.6) + 4;
+    const padR = 8;
+    const padT = 10;
+    const padB = font + 10;
+    const iw = w - padL - padR;
+    const ih = h - padT - padB;
+    const span = hi - lo;
+    const xOf = (i: number): number => padL + (i / (vals.length - 1)) * iw;
+    const yOf = (v: number): number => padT + ih - ((v - lo) / span) * ih;
+    ctx.clearRect(0, 0, w, h);
+    // 爬坡段：按等级填曲线下方投影面积
+    const segs = this.climbSegs();
+    const baseY = padT + ih;
+    for (let s = 0; s < segs.length; s++) {
+      const seg = segs[s];
+      let color = '#8A93A5';
+      if (seg.cat === 'HC') {
+        color = '#D9534F';
+      } else if (seg.cat === 'Cat 1') {
+        color = '#E0A33E';
+      } else if (seg.cat === 'Cat 2') {
+        color = '#F0B65A';
+      } else if (seg.cat === 'Cat 3') {
+        color = '#2FA36B';
+      } else if (seg.cat === 'Cat 4') {
+        color = '#2E9BB5';
+      }
+      ctx.globalAlpha = 0.30;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(xOf(seg.i0), baseY);
+      for (let i = seg.i0; i <= seg.i1 && i < vals.length; i++) {
+        const v = vals[i];
+        if (!Number.isNaN(v)) {
+          ctx.lineTo(xOf(i), yOf(v));
+        }
+      }
+      ctx.lineTo(xOf(Math.min(seg.i1, vals.length - 1)), baseY);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // 曲线
+    ctx.strokeStyle = '#E0A33E';
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < vals.length; i++) {
+      const v = vals[i];
+      if (Number.isNaN(v)) {
+        continue;
+      }
+      const px = xOf(i);
+      const py = yOf(v);
+      if (!started) {
+        ctx.moveTo(px, py);
+        started = true;
+      } else {
+        ctx.lineTo(px, py);
+      }
+    }
+    ctx.stroke();
+    // 刻度
+    ctx.font = font + 'px sans-serif';
+    ctx.fillStyle = Theme.axis(this.dark);
+    const ticks: number[] = [hi, lo];
+    for (let t = 0; t < ticks.length; t++) {
+      const yy = yOf(ticks[t]);
+      ctx.fillText(Math.round(ticks[t]) + 'm', Math.round(font * 0.15), yy + Math.round(font * 0.35));
+    }
+  }
+
+  private drawHr(): void {
+    const r = this.route;
+    if (r === null || !r.available || r.points.length < 3) {
+      return;
+    }
+    const vals: number[] = [];
+    for (let i = 0; i < r.points.length; i++) {
+      const v = r.points[i].hr;
+      vals.push(v === undefined || v === null ? NaN : v);
+    }
+    this.drawSeries(this.hrCtx, vals, '#D9534F', '');
+  }
+
+  /**
+   * 找出爬坡段并分级。
+   * 步骤：① 海拔 5 点滑动平均（压 GPS 抖动）② 平滑值算坡度，>0.6% 视为上坡
+   *       ③ 迟滞 40 m：短暂平路/缓下不打断同一段坡 ④ 段长 ≥200 m 且爬升 ≥10 m 才计
+   * 分级：评分 = 爬升(m) × 平均坡度(%)；≥5000 HC，≥3000 Cat 1，≥1600 Cat 2，≥800 Cat 3，≥300 Cat 4，其余 Cat 5。
+   * 参数是在 18 号真实轨迹上扫掠得出的（能识别出 2 段缓长坡 + 2 段短陡坡）。
+   */
+  private climbSegs(): ClimbSeg[] {
+    const r = this.route;
+    if (r === null || !r.available) {
+      return [];
+    }
+    const pts = r.points;
+    // ① 平滑海拔（5 点）
+    const sm: number[] = [];
+    for (let i = 0; i < pts.length; i++) {
+      let sum = 0;
+      let n = 0;
+      for (let k = Math.max(0, i - 2); k <= Math.min(pts.length - 1, i + 2); k++) {
+        const v = pts[k].elev;
+        if (v !== null) {
+          sum += v;
+          n++;
+        }
+      }
+      sm.push(n > 0 ? sum / n : NaN);
+    }
+    const out: ClimbSeg[] = [];
+    let si = -1;
+    let lastUp = -1;
+    const emit = (a: number, b: number) => {
+      if (a < 0 || b <= a) {
+        return;
+      }
+      const pa = pts[a];
+      const pb = pts[b];
+      if (pa.dist === null || pb.dist === null || Number.isNaN(sm[a]) || Number.isNaN(sm[b])) {
+        return;
+      }
+      const lenM = pb.dist - pa.dist;
+      const asc = sm[b] - sm[a];
+      if (lenM < 200 || asc < 10) {
+        return;
+      }
+      const lenKm = Math.round((lenM / 1000) * 100) / 100;
+      const grade = Math.round((asc / lenM) * 1000) / 10;
+      const score = Math.round(asc * grade);
+      let cat = 'Cat 5';
+      if (score >= 5000) {
+        cat = 'HC';
+      } else if (score >= 3000) {
+        cat = 'Cat 1';
+      } else if (score >= 1600) {
+        cat = 'Cat 2';
+      } else if (score >= 800) {
+        cat = 'Cat 3';
+      } else if (score >= 300) {
+        cat = 'Cat 4';
+      }
+      out.push({ startKm: Math.round((pa.dist / 1000) * 10) / 10, lengthKm: lenKm, ascent: Math.round(asc), grade: grade, cat: cat, i0: a, i1: b });
+    };
+    for (let i = 1; i < pts.length; i++) {
+      const pa = pts[i - 1];
+      const pb = pts[i];
+      let g = 0;
+      if (!Number.isNaN(sm[i - 1]) && !Number.isNaN(sm[i]) && pa.dist !== null && pb.dist !== null) {
+        const dd = pb.dist - pa.dist;
+        if (dd > 0.5) {
+          g = ((sm[i] - sm[i - 1]) / dd) * 100;
+        }
+      }
+      if (g > 0.6) {
+        if (si < 0) {
+          si = i - 1;
+        }
+        lastUp = i;
+      } else if (si >= 0) {
+        const dNow = pb.dist;
+        const dLast = pts[lastUp].dist;
+        const gap = (dNow === null ? 0 : dNow) - (dLast === null ? 0 : dLast);
+        if (gap > 40) {
+          emit(si, lastUp);
+          si = -1;
+        }
+      }
+    }
+    if (si >= 0) {
+      emit(si, lastUp);
+    }
+    return out;
+  }
+
+  /** 海拔变化（含爬坡段分级） */
+  @Builder
+  elevCard() {
+    Column() {
+      Row() {
+        Text('海拔变化').fontSize(13).fontWeight(FontWeight.Medium)
+        Blank()
+        Text('m').fontSize(10).fontColor($r('app.color.text_tertiary'))
+      }
+      .width('100%')
+      if (this.route !== null && this.route.available) {
+        Canvas(this.elevCtx)
+          .width('100%').height(140).margin({ top: 8 })
+          .onReady(() => { this.drawElev(); })
+          .backgroundColor($r('app.color.card_background_blur'))
+          .borderRadius(12)
+        if (true) {
+          Divider().color($r('app.color.card_border_highlight')).margin({ top: 8, bottom: 6 })
+          Text(this.climbSegs().length > 0 ? ('爬坡段 ' + this.climbSegs().length + ' 段 · 分级：爬升(m) × 平均坡度(%)') : '未检测到明显爬坡（阈值：坡度>1%、长度≥200m、爬升≥10m）')
+            .fontSize(10).fontColor($r('app.color.text_tertiary')).width('100%')
+          ForEach(this.climbSegs(), (c: ClimbSeg) => {
+            Row() {
+              Text(c.cat).fontSize(11).fontWeight(FontWeight.Bold).fontColor($r('app.color.accent')).width(52)
+              Text('起步 ' + c.startKm + ' km').fontSize(10).fontColor($r('app.color.text_secondary')).width(80)
+              Text(c.lengthKm + ' km').fontSize(10).fontColor($r('app.color.text_secondary')).width(54)
+              Text('+' + c.ascent + ' m').fontSize(10).fontColor($r('app.color.text_secondary')).width(60)
+              Text(c.grade + '%').fontSize(10).fontColor($r('app.color.warn')).layoutWeight(1).textAlign(TextAlign.End)
+            }.width('100%').padding({ top: 3, bottom: 3 })
+          }, (c: ClimbSeg) => '' + c.startKm + c.lengthKm)
+        }
+      } else {
+        Text('该活动没有海拔数据').fontSize(11).fontColor($r('app.color.text_hint')).width('100%').margin({ top: 8 })
+      }
+    }
+    .padding(14).width('100%').margin({ top: 8 })
+    .backgroundColor($r('app.color.card_background_blur'))
+    .border({ width: 1, color: $r('app.color.card_border_highlight') })
+    .borderRadius(14)
+  }
+
+  /** 心率变化 */
+  @Builder
+  hrCard() {
+    Column() {
+      Row() {
+        Text('心率变化').fontSize(13).fontWeight(FontWeight.Medium)
+        Blank()
+        Text('bpm').fontSize(10).fontColor($r('app.color.text_tertiary'))
+      }
+      .width('100%')
+      if (this.route !== null && this.route.available) {
+        Canvas(this.hrCtx)
+          .width('100%').height(140).margin({ top: 8 })
+          .onReady(() => { this.drawHr(); })
+          .backgroundColor($r('app.color.card_background_blur'))
+          .borderRadius(12)
+      } else {
+        Text('该活动没有心率数据').fontSize(11).fontColor($r('app.color.text_hint')).width('100%').margin({ top: 8 })
+      }
+    }
+    .padding(14).width('100%').margin({ top: 8 })
+    .backgroundColor($r('app.color.card_background_blur'))
+    .border({ width: 1, color: $r('app.color.card_border_highlight') })
+    .borderRadius(14)
+  }
+
   @Builder
   routeCard() {
     Column() {
@@ -962,6 +1302,7 @@ struct ActivityDetailPage {
             Text(this.detail.activityName).fontSize(19).fontWeight(FontWeight.Bold).width('100%')
             Text(Fmt.shortTime(this.detail.startTimeLocal)).fontSize(12).fontColor(Theme.tsb(this.dark))
               .width('100%').margin({ top: 2, bottom: 10 })
+
             Row() {
               Column() {
                 Text(Fmt.km(this.detail.distance)).fontSize(24).fontWeight(FontWeight.Bold)
@@ -977,17 +1318,9 @@ struct ActivityDetailPage {
               }.alignItems(HorizontalAlign.Start).layoutWeight(1)
             }
             .width('100%').padding(14).backgroundColor($r('app.color.card_background_blur')).border({ width: 1, color: $r('app.color.card_border_highlight') }).borderRadius(14)
-            if (this.hasCurve()) {
-              Column() {
-                Text('功率曲线（最佳平均功率）').fontSize(14).fontWeight(FontWeight.Medium).width('100%')
-                Canvas(this.ctx)
-                  .width('100%')
-                  .height(180)
-                  .margin({ top: 6 })
-                  .onReady(() => { this.drawCurve(); })
-              }
-              .padding(14).width('100%').backgroundColor($r('app.color.card_background_blur')).border({ width: 1, color: $r('app.color.card_border_highlight') }).borderRadius(14).margin({ top: 12 })
-            }
+
+            this.routeCard()
+
             Column() {
               this.row('平均功率', Fmt.num(this.detail.avgPower, ' W'))
               this.row('标准化功率 NP', Fmt.num(this.detail.normPower, ' W'))
@@ -1004,6 +1337,21 @@ struct ActivityDetailPage {
               this.row('VO2max', Fmt.int(this.detail.vO2MaxValue))
             }
             .padding(14).width('100%').backgroundColor($r('app.color.card_background_blur')).border({ width: 1, color: $r('app.color.card_border_highlight') }).borderRadius(14).margin({ top: 12 })
+            this.elevCard()
+
+            this.hrCard()
+
+            if (this.hasCurve()) {
+              Column() {
+                Text('功率曲线（最佳平均功率）').fontSize(14).fontWeight(FontWeight.Medium).width('100%')
+                Canvas(this.ctx)
+                  .width('100%')
+                  .height(180)
+                  .margin({ top: 6 })
+                  .onReady(() => { this.drawCurve(); })
+              }
+              .padding(14).width('100%').backgroundColor($r('app.color.card_background_blur')).border({ width: 1, color: $r('app.color.card_border_highlight') }).borderRadius(14).margin({ top: 12 })
+            }
             if (this.hasPowerZones()) {
               Column() {
                 Text('功率区间时长').fontSize(14).fontWeight(FontWeight.Medium).width('100%')
@@ -1105,8 +1453,8 @@ struct ActivityDetailPage {
               .border({ width: 1, color: $r('app.color.card_border_highlight') })
               .borderRadius(14)
             }
-            this.routeCard()
 
+        Row().height(96 + this.bottomInset)
         Row().height(96 + this.bottomInset)
           }
           .width('100%')

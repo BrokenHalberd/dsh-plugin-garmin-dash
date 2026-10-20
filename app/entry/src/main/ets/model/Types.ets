@@ -178,6 +178,7 @@ export interface RoutePoint {
   speed: number | null;
   power: number | null;
   hr: number | null;
+  elev: number | null;
   dist: number | null;
 }
 
@@ -205,4 +206,16 @@ export interface RouteStats {
   powerMin: number | null;
   powerMax: number | null;
   powerAvg: number | null;
+}
+
+/** 爬坡段（由轨迹海拔与累计距离推算） */
+export interface ClimbSeg {
+  startKm: number;
+  lengthKm: number;
+  ascent: number;
+  grade: number;
+  cat: string;
+  /** 在轨迹点数组中的起止下标（画面积用） */
+  i0: number;
+  i1: number;
 }
