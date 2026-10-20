@@ -1,3 +1,4 @@
+import { MarkdownView } from '../view/MarkdownView';
 import { common } from '@kit.AbilityKit';
 import { router } from '@kit.ArkUI';
 import { ApiClient } from '../service/ApiClient';
@@ -120,11 +121,7 @@ struct DshChatPage {
         Blank()
       }
       Column() {
-        Text(m.text)
-          .fontSize(15)
-          .lineHeight(22)
-          .fontColor(m.role === 'user' ? $r('app.color.accent_on') : $r('app.color.text_primary'))
-          .textAlign(TextAlign.Start)
+        MarkdownView({ text: m.text })
         if (m.tools.length > 0) {
           Text('调用：' + m.tools)
             .fontSize(10)
@@ -134,7 +131,7 @@ struct DshChatPage {
       }
       .alignItems(HorizontalAlign.Start)
       .padding({ left: 14, right: 14, top: 10, bottom: 10 })
-      .constraintSize({ maxWidth: '82%' })
+      .constraintSize({ maxWidth: '100%' })
       .backgroundColor(m.role === 'user' ? $r('app.color.accent') : $r('app.color.card_background_blur'))
       .borderRadius(18)
       .border({
