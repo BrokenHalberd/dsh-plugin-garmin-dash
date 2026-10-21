@@ -1,5 +1,5 @@
 import { ApiClient } from '../service/ApiClient';
-import { DeviceStore } from '../service/DeviceStore';
+import { DeviceStore, CardExtra } from '../service/DeviceStore';
 import { Summary, Trend, TrendPoint , HrvInfo , BodyBattery } from '../model/Types';
 import { Fmt } from '../util/Format';
 
@@ -52,6 +52,7 @@ export struct StatusView {
     this.loadHrv(false);
     this.loadBb();
     this.load(false);
+    this.loadForm();
   }
 
   onTick(): void {
@@ -377,6 +378,20 @@ export struct StatusView {
   }
 
   private hrvStatusText(): string {
+    // Garmin 原始枚举 → 中文（BALANCED / UNBALANCED / LOW / HIGH）
+    const raw = this.hrv === null || this.hrv.status === null ? '' : this.hrv.status.toUpperCase();
+    if (raw === 'BALANCED') {
+      return '平衡区';
+    }
+    if (raw === 'UNBALANCED') {
+      return '偏离平衡区';
+    }
+    if (raw === 'LOW') {
+      return '低于平衡区';
+    }
+    if (raw === 'HIGH') {
+      return '高于平衡区';
+    }
     const h = this.hrv;
     if (this.hrvErr.length > 0) {
       return '读取失败';
@@ -388,13 +403,13 @@ export struct StatusView {
       return h.available ? '--' : '无数据';
     }
     if (h.status === 'LOW') {
-      return '偏低';
+      return '低于平衡区';
     }
     if (h.status === 'HIGH') {
-      return '偏高';
+      return '高于平衡区';
     }
     if (h.status === 'BALANCED') {
-      return '平衡';
+      return '平衡区';
     }
     return h.status;
   }
@@ -415,22 +430,34 @@ export struct StatusView {
 
   private hrvAdvice(): string {
     const h = this.hrv;
-    if (this.hrvErr.length > 0) {
-      return 'HRV 读取失败：' + this.hrvErr + '　（点右上角「刷新」重试）';
+    if (h === null || h.status === null) {
+      return 'HRV 暂无数据：确保夜间佩戴手表，并在手表上开启 HRV 状态记录';
     }
-    if (h === null) {
-      return '正在读取佳明 HRV Status…';
+    const raw = h.status.toUpperCase();
+    if (raw === 'BALANCED') {
+      const t = this.tsb;
+      const r = this.ramp;
+      if (t !== null && t < -20) {
+        return 'HRV 平衡，但疲劳偏高（TSB ' + Math.round(t) + '）：今天做轻松有氧，先别加量';
+      }
+      if (r !== null && r > 8) {
+        return 'HRV 平衡，但周负荷增幅偏大（+' + Math.round(r) + '）：保持现状，别再往上加';
+      }
+      if (t !== null && t > 10) {
+        return 'HRV 平衡且状态新鲜（TSB +' + Math.round(t) + '）：适合做质量课（阈值/间歇）';
+      }
+      return 'HRV 平衡：按计划推进，保持睡眠与恢复节奏';
     }
-    if (!h.available) {
-      return '该日期没有 HRV 数据（需要手表支持 HRV Status 且佩戴过夜）';
+    if (raw === 'UNBALANCED') {
+      return '略低于个人平衡区：今天避免阈值以上强度，优先睡眠，观察 2~3 天是否回升';
     }
-    if (h.status === 'LOW') {
-      return 'HRV 偏低：优先睡眠与恢复，今天避免阈值以上高强度';
+    if (raw === 'LOW') {
+      return '明显低于个人基线：主动减量 30~50%，睡够；连续 3 天以上注意是否感冒或过训';
     }
-    if (h.status === 'HIGH') {
-      return 'HRV 偏高：恢复良好，可正常或略加量';
+    if (raw === 'HIGH') {
+      return '高于个人平衡区：恢复充分，可正常训练或略加量（+5~10%）';
     }
-    return 'HRV 平衡：按计划推进即可';
+    return 'HRV 状态：' + h.status;
   }
 
   private hrvBarPct(kind: string): string {
@@ -476,6 +503,59 @@ export struct StatusView {
     .borderRadius(14)
   }
 
+
+  /** HRV 条：低区宽度（按 baselineLow 真实数值 ✓） */
+  private hrvWLow(): number {
+    const h = this.hrv;
+    if (h === null || h.baselineLow === null || h.baselineLow <= 0) {
+      return 1;
+    }
+    return Math.max(1, h.baselineLow);
+  }
+
+  /** HRV 条：平衡区宽度（balancedLow → balancedUpper ✓） */
+  private hrvWMid(): number {
+    const h = this.hrv;
+    if (h === null || h.baselineLow === null || h.baselineBalancedUpper === null) {
+      return 1;
+    }
+    return Math.max(1, h.baselineBalancedUpper - h.baselineLow);
+  }
+
+  /** HRV 条：高区宽度（固定尾巴 20ms ✓） */
+  private hrvWHigh(): number {
+    return 20;
+  }
+
+  /** HRV 当前值在整条上的位置（0~100%）✓ */
+  private hrvMarkerPct(): number {
+    const h = this.hrv;
+    if (h === null || h.lastNightAvg === null || h.baselineBalancedUpper === null) {
+      return -1;
+    }
+    const total = h.baselineBalancedUpper + 20;
+    if (total <= 0) {
+      return -1;
+    }
+    let pct = (h.lastNightAvg / total) * 100;
+    if (pct < 2) {
+      pct = 2;
+    }
+    if (pct > 98) {
+      pct = 98;
+    }
+    return Math.round(pct);
+  }
+
+  /** 区间文字（带数字 ✓） */
+  private hrvRangeText(): string {
+    const h = this.hrv;
+    if (h === null || h.baselineLow === null || h.baselineBalancedUpper === null) {
+      return '—';
+    }
+    return '低于 ' + h.baselineLow + ' / ' + h.baselineLow + '–' + h.baselineBalancedUpper + ' / 高于 ' + h.baselineBalancedUpper + ' ms';
+  }
+
   @Builder
   hrvCard() {
     Column() {
@@ -507,21 +587,30 @@ export struct StatusView {
       }
       .width('100%')
 
-      Row() {
-        Row().width(this.hrvBarPct('low')).height(10).backgroundColor(COLOR_DANGER)
-        Row().width(this.hrvBarPct('mid')).height(10).backgroundColor(COLOR_ACCENT)
-        Row().width(this.hrvBarPct('high')).height(10).backgroundColor(COLOR_WARN)
+      Stack({ alignContent: Alignment.Start }) {
+        Row() {
+          Row().layoutWeight(this.hrvWLow()).height('100%').backgroundColor(COLOR_DANGER)
+          Row().layoutWeight(this.hrvWMid()).height('100%').backgroundColor(COLOR_ACCENT)
+          Row().layoutWeight(this.hrvWHigh()).height('100%').backgroundColor(COLOR_WARN)
+        }
+        .width('100%').height('100%').borderRadius(5).clip(true)
+        if (this.hrvMarkerPct() >= 0) {
+          Column() {
+            Row().width(3).height(14).backgroundColor('#FFFFFF').borderRadius(2)
+          }
+          .width('100%').height('100%').padding({ left: this.hrvMarkerPct() + '%' })
+          .alignItems(HorizontalAlign.Start)
+        }
       }
-      .width('100%').borderRadius(5).clip(true).margin({ top: 10 })
+      .width('100%').height(10).margin({ top: 10 })
       Row() {
-        Text('低').fontSize(9).fontColor(COLOR_HINT).layoutWeight(1)
-        Text('平衡').fontSize(9).fontColor(COLOR_HINT).layoutWeight(1).textAlign(TextAlign.Center)
-        Text('高').fontSize(9).fontColor(COLOR_HINT).layoutWeight(1).textAlign(TextAlign.End)
+        Text(this.hrvRangeText()).fontSize(9).fontColor(COLOR_HINT)
+        Blank()
+        Text('白线=昨夜值').fontSize(9).fontColor(COLOR_HINT)
       }
-      .width('100%').margin({ top: 2 })
+      .width('100%').margin({ top: 4 })
 
       Text(this.hrvAdvice()).fontSize(11).fontColor(COLOR_SECONDARY).width('100%').margin({ top: 8 })
-      Text('数据来源：佳明 HRV Status（基线区间分低/平衡/高三段）')
         .fontSize(9).fontColor(COLOR_HINT).width('100%').margin({ top: 4 })
     }
     .padding(14).width('100%')
@@ -589,12 +678,34 @@ export struct StatusView {
       const last: TrendPoint = t.points[t.points.length - 1];
 
       this.tsb = last.tsb;
-    // 同步给桌面服务卡片（读缓存，卡片秒开 ✓）
-    DeviceStore.setCardCache(this.tsb, this.ctl, this.atl, '');
 
       this.ctl = last.ctl;
 
       this.atl = last.atl;
+        // 同步给桌面服务卡片（此时 tsb/ctl/atl 都是最新 ✓）
+        let wt = 0;
+        const pts = t.points;
+        for (let i = Math.max(0, pts.length - 7); i < pts.length; i++) {
+          const one = pts[i].tss;
+          wt = wt + (one === null ? 0 : one);
+        }
+        const sl = this.summary === null ? null : this.summary.sleep;
+        const hv = this.hrv;
+        const extra: CardExtra = {
+          weekTss: wt,
+          steps: this.summary === null ? null : this.summary.steps,
+          rhr: this.summary === null ? null : this.summary.restingHeartRate,
+          bb: this.bb === null ? null : this.bb.high,
+          sleepDeep: sl === null ? null : sl.deepMinutes,
+          sleepLight: sl === null ? null : sl.lightMinutes,
+          sleepRem: sl === null ? null : sl.remMinutes,
+          sleepAwake: sl === null ? null : sl.awakeMinutes,
+          hrvNow: hv === null ? null : hv.lastNightAvg,
+          hrvLow: hv === null ? null : hv.baselineLow,
+          hrvB1: hv === null ? null : hv.baselineBalancedLow,
+          hrvB2: hv === null ? null : hv.baselineBalancedUpper
+        };
+        DeviceStore.setCardCache(getContext(this).filesDir, last.tsb, last.ctl, last.atl, '', extra);
 
       if (t.points.length >= 8) {
 

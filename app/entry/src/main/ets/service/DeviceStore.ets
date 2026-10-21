@@ -2,8 +2,26 @@
  * 本地存储：公网入口地址 + 设备密钥（配对一次，之后免扫）
  * 使用 preferences 持久化；deviceKey 只在首次配对时写入。
  */
+import { fileIo } from '@kit.CoreFileKit';
+import { buffer } from '@kit.ArkTS';
 import { preferences } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';
+
+/** 服务卡片附加数据（睡眠/HRV） */
+export interface CardExtra {
+  weekTss: number | null;
+  steps: number | null;
+  rhr: number | null;
+  bb: number | null;
+  sleepDeep: number | null;
+  sleepLight: number | null;
+  sleepRem: number | null;
+  sleepAwake: number | null;
+  hrvNow: number | null;
+  hrvLow: number | null;
+  hrvB1: number | null;
+  hrvB2: number | null;
+}
 
 /** 服务卡片展示用的缓存（由状态页刷新时写入） */
 export interface CardCache {
@@ -12,6 +30,18 @@ export interface CardCache {
   atl: string;
   ride: string;
   updated: string;
+  weekTss: string;
+  steps: string;
+  rhr: string;
+  bb: string;
+  sleepDeep: string;
+  sleepLight: string;
+  sleepRem: string;
+  sleepAwake: string;
+  hrvNow: string;
+  hrvLow: string;
+  hrvB1: string;
+  hrvB2: string;
 }
 
 const STORE_NAME: string = 'garmin_dash';
@@ -36,35 +66,69 @@ export class DeviceStore {
   }
 
 
-  /** 写卡片缓存（状态页拿到数据后调用） */
-  static setCardCache(tsb: number | null, ctl: number | null, atl: number | null, ride: string): void {
-    const st = DeviceStore.ensure();
-    st.putSync('cardTsb', tsb === null ? '' : String(Math.round(tsb * 10) / 10));
-    st.putSync('cardCtl', ctl === null ? '' : String(Math.round(ctl * 10) / 10));
-    st.putSync('cardAtl', atl === null ? '' : String(Math.round(atl * 10) / 10));
-    st.putSync('cardRide', ride);
+  /** 写卡片缓存到文件（卡片进程跨进程可读 ✓） */
+  static setCardCache(filesDir: string, tsb: number | null, ctl: number | null, atl: number | null, ride: string, x: CardExtra): void {
     const dd = new Date();
     const hh = dd.getHours() < 10 ? '0' + dd.getHours() : '' + dd.getHours();
     const mm = dd.getMinutes() < 10 ? '0' + dd.getMinutes() : '' + dd.getMinutes();
-    st.putSync('cardUpdated', hh + ':' + mm);
+    const o: CardCache = {
+      tsb: tsb === null ? '' : String(Math.round(tsb * 10) / 10),
+      ctl: ctl === null ? '' : String(Math.round(ctl * 10) / 10),
+      atl: atl === null ? '' : String(Math.round(atl * 10) / 10),
+      ride: ride,
+      updated: hh + ':' + mm,
+      weekTss: x.weekTss === null ? '' : String(Math.round(x.weekTss)),
+      steps: x.steps === null ? '' : String(Math.round(x.steps)),
+      rhr: x.rhr === null ? '' : String(Math.round(x.rhr)),
+      bb: x.bb === null ? '' : String(Math.round(x.bb)),
+      sleepDeep: x.sleepDeep === null ? '' : String(Math.round(x.sleepDeep)),
+      sleepLight: x.sleepLight === null ? '' : String(Math.round(x.sleepLight)),
+      sleepRem: x.sleepRem === null ? '' : String(Math.round(x.sleepRem)),
+      sleepAwake: x.sleepAwake === null ? '' : String(Math.round(x.sleepAwake)),
+      hrvNow: x.hrvNow === null ? '' : String(Math.round(x.hrvNow)),
+      hrvLow: x.hrvLow === null ? '' : String(Math.round(x.hrvLow)),
+      hrvB1: x.hrvB1 === null ? '' : String(Math.round(x.hrvB1)),
+      hrvB2: x.hrvB2 === null ? '' : String(Math.round(x.hrvB2))
+    };
+    try {
+      const f = fileIo.openSync(filesDir + '/card_cache.json',
+        fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+      try {
+        fileIo.writeSync(f.fd, JSON.stringify(o));
+      } finally {
+        fileIo.closeSync(f);
+      }
+    } catch (e) {
+      // 写失败不影响主流程
+    }
   }
 
-  /** 读卡片缓存（卡片 onAddForm 调用） */
-  static getCardCache(): CardCache {
-    const st = DeviceStore.ensure();
-    const tb = st.getSync('cardTsb', '') as string;
-    const cl = st.getSync('cardCtl', '') as string;
-    const at = st.getSync('cardAtl', '') as string;
-    const rd = st.getSync('cardRide', '') as string;
-    const up = st.getSync('cardUpdated', '') as string;
-    const out: CardCache = {
-      tsb: tb.length === 0 ? '—' : tb,
-      ctl: cl.length === 0 ? '—' : cl,
-      atl: at.length === 0 ? '—' : at,
-      ride: rd.length === 0 ? '打开 App 同步数据' : rd,
-      updated: up
+  /** 从文件读卡片缓存（卡片 onAddForm 调用 ✓ 不用 preferences ✓） */
+  static getCardCache(filesDir: string): CardCache {
+    const fallback: CardCache = {
+      tsb: '', ctl: '', atl: '', ride: '打开 App 同步数据', updated: '', weekTss: '',
+      steps: '', rhr: '', bb: '', sleepDeep: '', sleepLight: '', sleepRem: '', sleepAwake: '',
+      hrvNow: '', hrvLow: '', hrvB1: '', hrvB2: ''
     };
-    return out;
+    try {
+      const path = filesDir + '/card_cache.json';
+      const f = fileIo.openSync(path, fileIo.OpenMode.READ_ONLY);
+      try {
+        const st = fileIo.statSync(f.fd);
+        if (st.size <= 0) {
+          return fallback;
+        }
+        const buf = new ArrayBuffer(st.size);
+        fileIo.readSync(f.fd, buf);
+        const txt = buffer.from(buf).toString('utf-8');
+        const o = JSON.parse(txt) as CardCache;
+        return o;
+      } finally {
+        fileIo.closeSync(f);
+      }
+    } catch (e) {
+      return fallback;
+    }
   }
 
   static getBaseUrl(): string {

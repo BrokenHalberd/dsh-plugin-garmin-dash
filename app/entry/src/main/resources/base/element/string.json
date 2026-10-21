@@ -1,5 +1,13 @@
 {
   "string": [
+  { "name": "widget_large_name", "value": "今日表单 · 大" },
+  { "name": "widget_large_desc", "value": "大卡片：表单判读 + 体能/疲劳 + 7天TSS + 最近骑行" },
+  { "name": "widget_small_name", "value": "今日表单 · 竖" },
+  { "name": "widget_small_desc", "value": "竖向紧凑版：TSB/CTL/ATL 三行竖排" },
+  { "name": "widget_display_name", "value": "今日表单" },
+  { "name": "widget_desc", "value": "一眼看到今天的训练负荷与状态" },
+  { "name": "EntryFormAbility_label", "value": "今日表单" },
+  { "name": "EntryFormAbility_desc", "value": "显示今日训练负荷" },
   { "name": "form_today", "value": "今日表单" },
   { "name": "form_today_desc", "value": "一眼看到今天的训练负荷与状态" },
     { "name": "module_desc", "value": "Garmin 数据仪表盘" },
