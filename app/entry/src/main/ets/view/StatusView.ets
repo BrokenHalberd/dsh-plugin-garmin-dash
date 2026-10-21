@@ -589,6 +589,8 @@ export struct StatusView {
       const last: TrendPoint = t.points[t.points.length - 1];
 
       this.tsb = last.tsb;
+    // 同步给桌面服务卡片（读缓存，卡片秒开 ✓）
+    DeviceStore.setCardCache(this.tsb, this.ctl, this.atl, '');
 
       this.ctl = last.ctl;
 

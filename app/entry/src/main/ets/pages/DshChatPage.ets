@@ -33,6 +33,7 @@ struct DshChatPage {
   @State msgs: ChatMsg[] = [];
   @State input: string = '';
   @State sending: boolean = false;
+  @State streamText: string = '';
   @State err: string = '';
   @State sessionId: string = '';
   @State dark: boolean = false;
@@ -95,18 +96,36 @@ struct DshChatPage {
           this.sessionId = r.sessionId;
           DeviceStore.setChatSession(r.sessionId);
         }
-        const tools: string = r.tools === undefined || r.tools === null ? '' : r.tools.join(' · ');
-        const reply: ChatMsg = { role: 'assistant', text: r.reply, tools: tools };
-        this.msgs = this.msgs.concat([reply]);
-        this.persistLog();
-        this.sending = false;
-        this.scrollBottom();
+        const tl: string = r.tools === undefined || r.tools === null ? '' : r.tools.join(' · ');
+        // 客户端逐字回放：文字一段段长出来（回答本身是一次生成的，这里只做显示效果）
+        this.reveal(r.reply, tl);
       })
       .catch((e: Object) => {
         this.sending = false;
         this.err = ApiClient.friendly(e);
       });
   }
+  /** 逐字回放：每 18ms 增加 14 字，结束后落成正式消息 */
+  private reveal(full: string, tools: string): void {
+    let i = 0;
+    const step = 14;
+    this.streamText = '';
+    const timer = setInterval(() => {
+      if (i >= full.length) {
+        clearInterval(timer);
+        this.streamText = '';
+        this.msgs = this.msgs.concat([{ role: 'assistant', text: full, tools: tools } as ChatMsg]);
+        this.persistLog();
+        this.sending = false;
+        this.scrollBottom();
+        return;
+      }
+      i = i + step;
+      this.streamText = full.substring(0, i);
+      this.scrollBottom();
+    }, 18);
+  }
+
   private newSession(): void {
     DeviceStore.clearChatSession();
     DeviceStore.setChatLog('[]');
@@ -220,7 +239,16 @@ struct DshChatPage {
         }, (m: ChatMsg) => m.role + m.text.length + m.text.substring(0, 12))
         if (this.sending) {
           ListItem() {
-            this.thinking()
+            if (this.streamText.length > 0) {
+          Column() {
+            MarkdownView({ text: this.streamText })
+          }
+          .width('100%').padding(12).margin({ top: 6 })
+          .backgroundColor($r('app.color.card_background_blur'))
+          .borderRadius(14)
+        } else {
+          this.thinking()
+        }
           }
         }
       }

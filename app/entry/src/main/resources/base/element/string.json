@@ -1,5 +1,7 @@
 {
   "string": [
+  { "name": "form_today", "value": "今日表单" },
+  { "name": "form_today_desc", "value": "一眼看到今天的训练负荷与状态" },
     { "name": "module_desc", "value": "Garmin 数据仪表盘" },
     { "name": "EntryAbility_desc", "value": "佳明仪表盘" },
     { "name": "EntryAbility_label", "value": "佳明仪表盘" },

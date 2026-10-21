@@ -103,6 +103,7 @@ export class ApiClient {
    * 内建聊天：把一条消息送进后端的固定持久会话，返回助手回复。
    * 后端保证工作区与权限档锁死，App 无法更改。
    */
+
   static async postChat(text: string, sessionId: string): Promise<ChatReply> {
     const t = await ApiClient.authedPost('/garmin-dash/api/chat', text, sessionId);
     return JSON.parse(t) as ChatReply;
@@ -236,3 +237,4 @@ export class ApiClient {
     return u;
   }
 }
+

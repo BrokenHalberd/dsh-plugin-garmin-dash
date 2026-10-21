@@ -979,19 +979,18 @@ struct ActivityDetailPage {
     const baseY = padT + ih;
     for (let s = 0; s < segs.length; s++) {
       const seg = segs[s];
-      let color = '#8A93A5';
+      let color = 'rgba(138,147,165,0.38)';
       if (seg.cat === 'HC') {
-        color = '#D9534F';
+        color = 'rgba(217,83,79,0.38)';
       } else if (seg.cat === 'Cat 1') {
-        color = '#E0A33E';
+        color = 'rgba(224,163,62,0.38)';
       } else if (seg.cat === 'Cat 2') {
-        color = '#F0B65A';
+        color = 'rgba(240,182,90,0.38)';
       } else if (seg.cat === 'Cat 3') {
-        color = '#2FA36B';
+        color = 'rgba(47,163,107,0.38)';
       } else if (seg.cat === 'Cat 4') {
-        color = '#2E9BB5';
+        color = 'rgba(46,155,181,0.38)';
       }
-      ctx.globalAlpha = 0.30;
       ctx.fillStyle = color;
       ctx.beginPath();
       ctx.moveTo(xOf(seg.i0), baseY);
@@ -1005,7 +1004,6 @@ struct ActivityDetailPage {
       ctx.closePath();
       ctx.fill();
     }
-    ctx.globalAlpha = 1;
     // 曲线
     ctx.strokeStyle = '#E0A33E';
     ctx.lineWidth = 1.8;
@@ -1053,7 +1051,7 @@ struct ActivityDetailPage {
    * 找出爬坡段并分级。
    * 步骤：① 海拔 5 点滑动平均（压 GPS 抖动）② 平滑值算坡度，>0.6% 视为上坡
    *       ③ 迟滞 40 m：短暂平路/缓下不打断同一段坡 ④ 段长 ≥200 m 且爬升 ≥10 m 才计
-   * 分级：评分 = 爬升(m) × 平均坡度(%)；≥5000 HC，≥3000 Cat 1，≥1600 Cat 2，≥800 Cat 3，≥300 Cat 4，其余 Cat 5。
+   * 分级：按平均坡度 12% HC / 10% Cat 1 / 8% Cat 2 / 6% Cat 3 / 4% Cat 4 / 其余 Cat 5。
    * 参数是在 18 号真实轨迹上扫掠得出的（能识别出 2 段缓长坡 + 2 段短陡坡）。
    */
   private climbSegs(): ClimbSeg[] {
@@ -1095,17 +1093,16 @@ struct ActivityDetailPage {
       }
       const lenKm = Math.round((lenM / 1000) * 100) / 100;
       const grade = Math.round((asc / lenM) * 1000) / 10;
-      const score = Math.round(asc * grade);
       let cat = 'Cat 5';
-      if (score >= 5000) {
+      if (grade >= 12) {
         cat = 'HC';
-      } else if (score >= 3000) {
+      } else if (grade >= 10) {
         cat = 'Cat 1';
-      } else if (score >= 1600) {
+      } else if (grade >= 8) {
         cat = 'Cat 2';
-      } else if (score >= 800) {
+      } else if (grade >= 6) {
         cat = 'Cat 3';
-      } else if (score >= 300) {
+      } else if (grade >= 4) {
         cat = 'Cat 4';
       }
       out.push({ startKm: Math.round((pa.dist / 1000) * 10) / 10, lengthKm: lenKm, ascent: Math.round(asc), grade: grade, cat: cat, i0: a, i1: b });
@@ -1159,7 +1156,7 @@ struct ActivityDetailPage {
           .borderRadius(12)
         if (true) {
           Divider().color($r('app.color.card_border_highlight')).margin({ top: 8, bottom: 6 })
-          Text(this.climbSegs().length > 0 ? ('爬坡段 ' + this.climbSegs().length + ' 段 · 分级：爬升(m) × 平均坡度(%)') : '未检测到明显爬坡（阈值：坡度>1%、长度≥200m、爬升≥10m）')
+          Text(this.climbSegs().length > 0 ? ('爬坡段 ' + this.climbSegs().length + ' 段 · 分级：按平均坡度 12/10/8/6/4%') : '未检测到明显爬坡（阈值：坡度>1%、长度≥200m、爬升≥10m）')
             .fontSize(10).fontColor($r('app.color.text_tertiary')).width('100%')
           ForEach(this.climbSegs(), (c: ClimbSeg) => {
             Row() {

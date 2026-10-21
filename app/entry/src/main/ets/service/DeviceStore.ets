@@ -5,6 +5,15 @@
 import { preferences } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';
 
+/** 服务卡片展示用的缓存（由状态页刷新时写入） */
+export interface CardCache {
+  tsb: string;
+  ctl: string;
+  atl: string;
+  ride: string;
+  updated: string;
+}
+
 const STORE_NAME: string = 'garmin_dash';
 const KEY_BASE_URL: string = 'baseUrl';
 const KEY_DEVICE_KEY: string = 'deviceKey';
@@ -24,6 +33,38 @@ export class DeviceStore {
       throw new Error('DeviceStore.init(context) 必须先调用');
     }
     return DeviceStore.store;
+  }
+
+
+  /** 写卡片缓存（状态页拿到数据后调用） */
+  static setCardCache(tsb: number | null, ctl: number | null, atl: number | null, ride: string): void {
+    const st = DeviceStore.ensure();
+    st.putSync('cardTsb', tsb === null ? '' : String(Math.round(tsb * 10) / 10));
+    st.putSync('cardCtl', ctl === null ? '' : String(Math.round(ctl * 10) / 10));
+    st.putSync('cardAtl', atl === null ? '' : String(Math.round(atl * 10) / 10));
+    st.putSync('cardRide', ride);
+    const dd = new Date();
+    const hh = dd.getHours() < 10 ? '0' + dd.getHours() : '' + dd.getHours();
+    const mm = dd.getMinutes() < 10 ? '0' + dd.getMinutes() : '' + dd.getMinutes();
+    st.putSync('cardUpdated', hh + ':' + mm);
+  }
+
+  /** 读卡片缓存（卡片 onAddForm 调用） */
+  static getCardCache(): CardCache {
+    const st = DeviceStore.ensure();
+    const tb = st.getSync('cardTsb', '') as string;
+    const cl = st.getSync('cardCtl', '') as string;
+    const at = st.getSync('cardAtl', '') as string;
+    const rd = st.getSync('cardRide', '') as string;
+    const up = st.getSync('cardUpdated', '') as string;
+    const out: CardCache = {
+      tsb: tb.length === 0 ? '—' : tb,
+      ctl: cl.length === 0 ? '—' : cl,
+      atl: at.length === 0 ? '—' : at,
+      ride: rd.length === 0 ? '打开 App 同步数据' : rd,
+      updated: up
+    };
+    return out;
   }
 
   static getBaseUrl(): string {
