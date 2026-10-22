@@ -3,6 +3,8 @@ let storageSmall = new LocalStorage();
 @Entry(storageSmall)
 @Component
 struct WidgetCardSmall {
+  @LocalStorageProp('spin') spin: string = '\u27F3';
+
   @LocalStorageProp('tsb') tsb: string = '';
   @LocalStorageProp('ctl') ctl: string = '';
   @LocalStorageProp('atl') atl: string = '';
@@ -13,7 +15,7 @@ struct WidgetCardSmall {
       return $r('app.color.text_tertiary');
     }
     const v = Number(s);
-    if (Number.isNaN(v)) {
+    if (!Number.isFinite(v)) {
       return $r('app.color.text_tertiary');
     }
     if (v > 5) {
@@ -36,6 +38,15 @@ struct WidgetCardSmall {
           .fontSize(17).fontWeight(FontWeight.Bold).fontColor(this.tsbColor())
       }
       .alignItems(HorizontalAlign.Center).layoutWeight(1)
+      .onClick(() => {
+        postCardAction(this, {
+          action: 'router',
+          bundleName: 'com.atlas.garmindash',
+          moduleName: 'entry',
+          abilityName: 'EntryAbility',
+          params: { page: 'Trend' }
+        });
+      })
 
       Column() {
         Text('CTL').fontSize(9).fontColor($r('app.color.text_tertiary'))
@@ -50,6 +61,17 @@ struct WidgetCardSmall {
           .fontSize(14).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
       }
       .alignItems(HorizontalAlign.Center).layoutWeight(1)
+
+      Text(this.spin)
+        .fontSize(12).fontColor($r('app.color.accent')).padding({ left: 2, right: 2 })
+        .onClick(() => {
+          postCardAction(this, {
+            action: 'message',
+            params: {
+              method: 'refresh'
+            }
+          });
+        })
     }
     .width('100%')
     .height('100%')
@@ -57,8 +79,5 @@ struct WidgetCardSmall {
     .backgroundColor($r('app.color.background'))
     .borderRadius(16)
     .justifyContent(FlexAlign.Center)
-    .onClick(() => {
-      postCardAction(this, { action: 'router', abilityName: 'EntryAbility', params: { page: 'Trend' } });
-    })
   }
 }

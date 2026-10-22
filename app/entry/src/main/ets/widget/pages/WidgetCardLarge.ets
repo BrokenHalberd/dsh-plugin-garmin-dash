@@ -7,6 +7,7 @@ struct WidgetCardLarge {
   @LocalStorageProp('ctl') ctl: string = '';
   @LocalStorageProp('atl') atl: string = '';
   @LocalStorageProp('updated') updated: string = '';
+  @LocalStorageProp('spin') spin: string = '\u27F3';
   @LocalStorageProp('weekTss') weekTss: string = '';
   @LocalStorageProp('steps') steps: string = '';
   @LocalStorageProp('rhr') rhr: string = '';
@@ -137,24 +138,62 @@ struct WidgetCardLarge {
   }
 
   @Builder
-  leftRow(label: string, value: string, color: ResourceColor) {
+  leftRowCtl() {
     Row() {
-      Text(label).fontSize(10).fontColor($r('app.color.text_tertiary')).width(56)
-      Text(this.st(value)).fontSize(14).fontWeight(FontWeight.Medium).fontColor(color)
+      Text('CTL 体能').fontSize(10).fontColor($r('app.color.text_tertiary')).width(56)
+      Text(this.st(this.ctl)).fontSize(14).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
     }
     .width('100%').margin({ top: 2 })
   }
 
   @Builder
-  rightItem(label: string, value: string) {
+  leftRowAtl() {
+    Row() {
+      Text('ATL 疲劳').fontSize(10).fontColor($r('app.color.text_tertiary')).width(56)
+      Text(this.st(this.atl)).fontSize(14).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
+    }
+    .width('100%').margin({ top: 2 })
+  }
+
+  @Builder
+  leftRowTss() {
+    Row() {
+      Text('7天 TSS').fontSize(10).fontColor($r('app.color.text_tertiary')).width(56)
+      Text(this.st(this.weekTss)).fontSize(14).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_secondary'))
+    }
+    .width('100%').margin({ top: 2 })
+  }
+
+  // 注意：@Builder 按值传参不会刷新 ✗ 所以值的 Text 必须直接读 this ✓
+  @Builder
+  metricSteps() {
     Column() {
-      Text(label).fontSize(9).fontColor($r('app.color.text_tertiary'))
-      Text(this.st(value)).fontSize(16).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
+      Text('步数').fontSize(9).fontColor($r('app.color.text_tertiary'))
+      Text(this.st(this.steps)).fontSize(16).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
+    }
+    .alignItems(HorizontalAlign.Start).layoutWeight(1)
+  }
+
+  @Builder
+  metricRhr() {
+    Column() {
+      Text('静息心率').fontSize(9).fontColor($r('app.color.text_tertiary'))
+      Text(this.st(this.rhr)).fontSize(16).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
+    }
+    .alignItems(HorizontalAlign.Start).layoutWeight(1)
+  }
+
+  @Builder
+  metricBb() {
+    Column() {
+      Text('电量').fontSize(9).fontColor($r('app.color.text_tertiary'))
+      Text(this.st(this.bb)).fontSize(16).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
     }
     .alignItems(HorizontalAlign.Start).layoutWeight(1)
   }
 
   build() {
+    Stack({ alignContent: Alignment.TopEnd }) {
     Row() {
       // ══ 左栏：表单 ══
       Column() {
@@ -166,23 +205,32 @@ struct WidgetCardLarge {
         .width('100%').alignItems(VerticalAlign.Bottom)
         Text(this.formLabel()).fontSize(10).fontColor(this.tsbColor()).width('100%')
         Divider().color($r('app.color.card_border_highlight')).margin({ top: 6, bottom: 2 })
-        this.leftRow('CTL 体能', this.ctl, $r('app.color.text_primary'))
-        this.leftRow('ATL 疲劳', this.atl, $r('app.color.text_primary'))
-        this.leftRow('7天 TSS', this.weekTss, $r('app.color.text_secondary'))
+        this.leftRowCtl()
+        this.leftRowAtl()
+        this.leftRowTss()
         Blank()
         Text(this.updated.length > 0 ? ('更新 ' + this.updated) : '点击打开趋势')
           .fontSize(9).fontColor($r('app.color.text_hint')).width('100%')
       }
       .width('36%').height('100%').alignItems(HorizontalAlign.Start).justifyContent(FlexAlign.Start)
+      .onClick(() => {
+        postCardAction(this, {
+          action: 'router',
+          bundleName: 'com.atlas.garmindash',
+          moduleName: 'entry',
+          abilityName: 'EntryAbility',
+          params: { page: 'Trend' }
+        });
+      })
 
       Row().width(1).height('92%').backgroundColor($r('app.color.card_border_highlight'))
 
       // ══ 右栏：今日概览 + 睡眠条 + HRV条（全部在右栏内 ✓ 不超出）══
       Column() {
         Row() {
-          this.rightItem('步数', this.steps)
-          this.rightItem('静息心率', this.rhr)
-          this.rightItem('电量', this.bb)
+          this.metricSteps()
+          this.metricRhr()
+          this.metricBb()
         }
         .width('100%')
 
@@ -256,8 +304,20 @@ struct WidgetCardLarge {
     .backgroundColor($r('app.color.background'))
     .borderRadius(18)
     .alignItems(VerticalAlign.Top)
-    .onClick(() => {
-      postCardAction(this, { action: 'router', abilityName: 'EntryAbility', params: { page: 'Trend' } });
-    })
+
+    // 覆盖层：独立点击区（不会被整卡 onClick 吞掉 ✓）
+    Text(this.spin)
+      .fontSize(14)
+      .fontColor($r('app.color.accent'))
+      .padding({ top: 10, right: 12 })
+      .onClick(() => {
+        postCardAction(this, {
+          action: 'message',
+          params: {
+            method: 'refresh'
+          }
+        });
+      })
+    }
   }
 }

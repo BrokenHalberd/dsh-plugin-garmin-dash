@@ -7,6 +7,24 @@ import { buffer } from '@kit.ArkTS';
 import { preferences } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';
 
+/** 安全数值格式化：null / undefined / NaN / Infinity 一律空串（防止卡片显示 NaN ✓） */
+function safeRound(v: number | null | undefined, digits: number): string {
+  if (v === null || v === undefined || !Number.isFinite(v)) {
+    return '';
+  }
+  if (digits > 0) {
+    const f = Math.pow(10, digits);
+    return String(Math.round(v * f) / f);
+  }
+  return String(Math.round(v));
+}
+
+/** 卡片进程用的网络配置 */
+export interface CardNet {
+  base: string;
+  key: string;
+}
+
 /** 服务卡片附加数据（睡眠/HRV） */
 export interface CardExtra {
   weekTss: number | null;
@@ -67,28 +85,63 @@ export class DeviceStore {
 
 
   /** 写卡片缓存到文件（卡片进程跨进程可读 ✓） */
+
+  /** 卡片网络配置（卡片在独立进程，读不到 preferences，所以落盘 ✓） */
+  static setCardNet(filesDir: string): void {
+    const base = DeviceStore.getBaseUrl();
+    const key = DeviceStore.getDeviceKey();
+    if (base.length === 0 || key.length === 0) {
+      return;
+    }
+    try {
+      const f = fileIo.openSync(filesDir + '/card_net.json', fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY | fileIo.OpenMode.TRUNC);
+      fileIo.writeSync(f.fd, JSON.stringify({ base: base, key: key }));
+      fileIo.closeSync(f);
+    } catch (e) {
+      // 忽略
+    }
+  }
+
+  static getCardNet(filesDir: string): CardNet {
+    try {
+      const f = fileIo.openSync(filesDir + '/card_net.json', fileIo.OpenMode.READ_ONLY);
+      const stat = fileIo.statSync(filesDir + '/card_net.json');
+      const buf = new ArrayBuffer(stat.size);
+      fileIo.readSync(f.fd, buf);
+      fileIo.closeSync(f);
+      const txt = buffer.from(buf).toString('utf-8');
+      const o = JSON.parse(txt) as CardNet;
+      if (o.base === undefined || o.key === undefined) {
+        return { base: '', key: '' };
+      }
+      return o;
+    } catch (e) {
+      return { base: '', key: '' };
+    }
+  }
+
   static setCardCache(filesDir: string, tsb: number | null, ctl: number | null, atl: number | null, ride: string, x: CardExtra): void {
     const dd = new Date();
     const hh = dd.getHours() < 10 ? '0' + dd.getHours() : '' + dd.getHours();
     const mm = dd.getMinutes() < 10 ? '0' + dd.getMinutes() : '' + dd.getMinutes();
     const o: CardCache = {
-      tsb: tsb === null ? '' : String(Math.round(tsb * 10) / 10),
-      ctl: ctl === null ? '' : String(Math.round(ctl * 10) / 10),
-      atl: atl === null ? '' : String(Math.round(atl * 10) / 10),
+      tsb: safeRound(tsb, 1),
+      ctl: safeRound(ctl, 1),
+      atl: safeRound(atl, 1),
       ride: ride,
       updated: hh + ':' + mm,
-      weekTss: x.weekTss === null ? '' : String(Math.round(x.weekTss)),
-      steps: x.steps === null ? '' : String(Math.round(x.steps)),
-      rhr: x.rhr === null ? '' : String(Math.round(x.rhr)),
-      bb: x.bb === null ? '' : String(Math.round(x.bb)),
-      sleepDeep: x.sleepDeep === null ? '' : String(Math.round(x.sleepDeep)),
-      sleepLight: x.sleepLight === null ? '' : String(Math.round(x.sleepLight)),
-      sleepRem: x.sleepRem === null ? '' : String(Math.round(x.sleepRem)),
-      sleepAwake: x.sleepAwake === null ? '' : String(Math.round(x.sleepAwake)),
-      hrvNow: x.hrvNow === null ? '' : String(Math.round(x.hrvNow)),
-      hrvLow: x.hrvLow === null ? '' : String(Math.round(x.hrvLow)),
-      hrvB1: x.hrvB1 === null ? '' : String(Math.round(x.hrvB1)),
-      hrvB2: x.hrvB2 === null ? '' : String(Math.round(x.hrvB2))
+      weekTss: safeRound(x.weekTss, 0),
+      steps: safeRound(x.steps, 0),
+      rhr: safeRound(x.rhr, 0),
+      bb: safeRound(x.bb, 0),
+      sleepDeep: safeRound(x.sleepDeep, 0),
+      sleepLight: safeRound(x.sleepLight, 0),
+      sleepRem: safeRound(x.sleepRem, 0),
+      sleepAwake: safeRound(x.sleepAwake, 0),
+      hrvNow: safeRound(x.hrvNow, 0),
+      hrvLow: safeRound(x.hrvLow, 0),
+      hrvB1: safeRound(x.hrvB1, 0),
+      hrvB2: safeRound(x.hrvB2, 0)
     };
     try {
       const f = fileIo.openSync(filesDir + '/card_cache.json',

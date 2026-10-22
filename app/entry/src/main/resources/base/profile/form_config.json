@@ -11,7 +11,7 @@
         "autoDesignWidth": true
       },
       "colorMode": "auto",
-      "isDynamic": false,
+      "isDynamic": true,
       "isDefault": true,
       "updateEnabled": true,
       "scheduledUpdateTime": "07:30",
@@ -32,7 +32,7 @@
         "autoDesignWidth": true
       },
       "colorMode": "auto",
-      "isDynamic": false,
+      "isDynamic": true,
       "isDefault": false,
       "updateEnabled": true,
       "scheduledUpdateTime": "07:30",
@@ -53,7 +53,7 @@
         "autoDesignWidth": true
       },
       "colorMode": "auto",
-      "isDynamic": false,
+      "isDynamic": true,
       "isDefault": false,
       "updateEnabled": true,
       "scheduledUpdateTime": "07:30",

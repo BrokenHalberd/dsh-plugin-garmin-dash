@@ -8,6 +8,7 @@ struct WidgetCard {
   @LocalStorageProp('atl') atl: string = '';
   @LocalStorageProp('ride') ride: string = '打开 App 同步';
   @LocalStorageProp('updated') updated: string = '';
+  @LocalStorageProp('spin') spin: string = '\u27F3';
 
   private tsbColor(): ResourceColor {
     const s = this.tsb;
@@ -15,7 +16,7 @@ struct WidgetCard {
       return $r('app.color.text_tertiary');
     }
     const v = Number(s);
-    if (Number.isNaN(v)) {
+    if (!Number.isFinite(v)) {
       return $r('app.color.text_tertiary');
     }
     if (v > 5) {
@@ -42,12 +43,24 @@ struct WidgetCard {
     return this.atl.length === 0 ? '—' : this.atl;
   }
 
-  @Builder
-  wideLayout() {
+  build() {
     Column() {
       Row() {
         Text('今日表单').fontSize(12).fontColor($r('app.color.text_secondary'))
         Blank()
+        // 刷新按钮（点击 → 通知 FormAbility 重读缓存 ✓）
+        Text(this.spin)
+          .fontSize(13)
+          .fontColor($r('app.color.accent'))
+          .padding({ left: 6, right: 2 })
+          .onClick(() => {
+            postCardAction(this, {
+              action: 'message',
+              params: {
+                method: 'refresh'
+              }
+            });
+          })
         Text('佳明').fontSize(10).fontColor($r('app.color.text_tertiary'))
       }
       .width('100%')
@@ -56,7 +69,16 @@ struct WidgetCard {
         Text(this.tsbText()).fontSize(30).fontWeight(FontWeight.Bold).fontColor(this.tsbColor())
         Text(' TSB').fontSize(11).fontColor($r('app.color.text_tertiary')).margin({ left: 2, bottom: 5 })
       }
-      .width('100%').alignItems(VerticalAlign.Bottom).margin({ top: 4 })
+      .width('100%').alignItems(VerticalAlign.Bottom).margin({ top: 2 })
+      .onClick(() => {
+        postCardAction(this, {
+          action: 'router',
+          bundleName: 'com.atlas.garmindash',
+          moduleName: 'entry',
+          abilityName: 'EntryAbility',
+          params: { page: 'Trend' }
+        });
+      })
 
       Row() {
         Column() {
@@ -71,36 +93,20 @@ struct WidgetCard {
         }
         .alignItems(HorizontalAlign.Start).layoutWeight(1)
       }
-      .width('100%').margin({ top: 8 })
+      .width('100%').margin({ top: 6 })
 
       Text(this.ride.length === 0 ? '打开 App 同步' : this.ride)
         .fontSize(10).fontColor($r('app.color.text_tertiary')).width('100%')
-        .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).margin({ top: 8 })
+        .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).margin({ top: 6 })
 
       if (this.updated.length > 0) {
         Text('更新 ' + this.updated).fontSize(9).fontColor($r('app.color.text_hint')).width('100%')
       }
     }
-    .width('100%').height('100%').alignItems(HorizontalAlign.Start).justifyContent(FlexAlign.Center)
-  }
-
-  build() {
-    Column() {
-      this.wideLayout()
-    }
-    .width('100%')
-    .height('100%')
-    .padding(14)
+    .width('100%').height('100%').padding(14)
     .backgroundColor($r('app.color.background'))
     .borderRadius(16)
-    .onClick(() => {
-      postCardAction(this, {
-        action: 'router',
-        abilityName: 'EntryAbility',
-        params: {
-          page: 'Trend'
-        }
-      });
-    })
+    .alignItems(HorizontalAlign.Start)
+    .justifyContent(FlexAlign.Center)
   }
 }

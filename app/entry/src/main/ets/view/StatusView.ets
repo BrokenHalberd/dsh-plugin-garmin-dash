@@ -1,4 +1,4 @@
-import { ApiClient } from '../service/ApiClient';
+import { ApiClient, BundleResult } from '../service/ApiClient';
 import { DeviceStore, CardExtra } from '../service/DeviceStore';
 import { Summary, Trend, TrendPoint , HrvInfo , BodyBattery } from '../model/Types';
 import { Fmt } from '../util/Format';
@@ -47,17 +47,17 @@ export struct StatusView {
   @State hrv: HrvInfo | null = null;
   @State hrvErr: string = '';
   @State bb: BodyBattery | null = null;
+  @State lastTrend: TrendPoint | null = null;
+  @State weekTss: number = 0;
 
   aboutToAppear(): void {
-    this.loadHrv(false);
-    this.loadBb();
-    this.load(false);
-    this.loadForm();
+    // 一次聚合请求拿全部（失败自动回退到分接口）
+    this.loadAll();
   }
 
   onTick(): void {
-    this.load(false);
-    this.loadForm();
+    // 与首屏一致：一次聚合请求（失败自动回退）
+    this.loadAll();
   }
 
   private isToday(): boolean {
@@ -73,7 +73,7 @@ export struct StatusView {
       return;
     }
     this.date = next;
-    this.load(false);
+    this.loadAll();
   }
 
   private load(fromPull: boolean): void {
@@ -663,6 +663,95 @@ export struct StatusView {
 
   /** 从趋势数据里取最后一点的 CTL/ATL/TSB，并算 7 天 ramp */
 
+  /** 一次请求拿全部；任一段为空则回退到对应分接口 */
+  private loadAll(): void {
+    ApiClient.getBundle(30, this.date)
+      .then((b: BundleResult) => {
+        if (b.trend !== undefined) {
+          this.applyTrend(JSON.stringify(b.trend));
+        }
+        if (b.summary !== undefined) {
+          this.summary = b.summary;
+          this.err = '';
+          this.staleNote = '';
+        }
+        if (b.hrv !== undefined) {
+          this.hrv = b.hrv;
+          this.hrvErr = '';
+        }
+        if (b.bodyBattery !== undefined) {
+          this.bb = b.bodyBattery;
+        }
+        this.loading = false;
+        this.refreshing = false;
+        if (b.partial.length > 0) {
+          this.staleNote = '部分数据缺失：' + b.partial.join('、');
+        }
+        this.writeCardCache(b);
+      })
+      .catch((e: Object) => {
+        // 回退：老的四路请求（保底可用 ✓）
+        this.staleNote = '聚合失败，已回退：' + ApiClient.friendly(e);
+        this.loadHrv(false);
+        this.loadBb();
+        this.load(false);
+        this.loadForm();
+      });
+  }
+
+  /**
+   * 把当前已就绪的所有状态写入桌面卡片缓存。
+   * 必须在 tsb/ctl/atl/summary/hrv/bb 全部赋值之后再调用（否则卡片拿到旧值或 null ✓）。
+   */
+  /** 安全数值：null/undefined/NaN 一律 null ✓ */
+  private nz(v: number | null | undefined): number | null {
+    if (v === null || v === undefined || Number.isNaN(v) || !Number.isFinite(v)) {
+      return null;
+    }
+    return v;
+  }
+
+  /**
+   * 把 bundle 里的数据直接写入卡片缓存（不依赖任何 this.* 状态 ✓ 彻底避免时序问题）。
+   */
+  private writeCardCache(b: BundleResult): void {
+    const trend = b.trend;
+    if (trend === undefined || trend.points.length === 0) {
+      return;
+    }
+    const last = trend.points[trend.points.length - 1];
+    let wt = 0;
+    for (let j = Math.max(0, trend.points.length - 7); j < trend.points.length; j++) {
+      const one = trend.points[j].tss;
+      wt = wt + (one === null ? 0 : one);
+    }
+    const s = b.summary;
+    const sl = (s === undefined || s === null) ? null : s.sleep;
+    const h = b.hrv;
+    const bv = b.bodyBattery;
+    let bbValue: number | null = null;
+    if (bv !== undefined && bv !== null && bv.available) {
+      const cur = bv.value;
+      bbValue = (cur === null || cur === undefined || Number.isNaN(cur)) ? null : cur;
+    }
+    const extra: CardExtra = {
+      weekTss: this.nz(wt),
+      steps: (s === undefined || s === null) ? null : this.nz(s.steps),
+      rhr: (s === undefined || s === null) ? null : this.nz(s.restingHeartRate),
+      bb: bbValue,
+      sleepDeep: sl === null ? null : this.nz(sl.deepMinutes),
+      sleepLight: sl === null ? null : this.nz(sl.lightMinutes),
+      sleepRem: sl === null ? null : this.nz(sl.remMinutes),
+      sleepAwake: sl === null ? null : this.nz(sl.awakeMinutes),
+      hrvNow: (h === undefined || h === null) ? null : this.nz(h.lastNightAvg),
+      hrvLow: (h === undefined || h === null) ? null : this.nz(h.baselineLow),
+      hrvB1: (h === undefined || h === null) ? null : this.nz(h.baselineBalancedLow),
+      hrvB2: (h === undefined || h === null) ? null : this.nz(h.baselineBalancedUpper)
+    };
+    DeviceStore.setCardNet(getContext(this).filesDir);
+    DeviceStore.setCardCache(getContext(this).filesDir, last.tsb, last.ctl, last.atl, '', extra);
+  }
+
   private applyTrend(json: string): void {
 
     try {
@@ -682,30 +771,17 @@ export struct StatusView {
       this.ctl = last.ctl;
 
       this.atl = last.atl;
-        // 同步给桌面服务卡片（此时 tsb/ctl/atl 都是最新 ✓）
+
+      this.lastTrend = last;
+      {
         let wt = 0;
         const pts = t.points;
         for (let i = Math.max(0, pts.length - 7); i < pts.length; i++) {
           const one = pts[i].tss;
           wt = wt + (one === null ? 0 : one);
         }
-        const sl = this.summary === null ? null : this.summary.sleep;
-        const hv = this.hrv;
-        const extra: CardExtra = {
-          weekTss: wt,
-          steps: this.summary === null ? null : this.summary.steps,
-          rhr: this.summary === null ? null : this.summary.restingHeartRate,
-          bb: this.bb === null ? null : this.bb.high,
-          sleepDeep: sl === null ? null : sl.deepMinutes,
-          sleepLight: sl === null ? null : sl.lightMinutes,
-          sleepRem: sl === null ? null : sl.remMinutes,
-          sleepAwake: sl === null ? null : sl.awakeMinutes,
-          hrvNow: hv === null ? null : hv.lastNightAvg,
-          hrvLow: hv === null ? null : hv.baselineLow,
-          hrvB1: hv === null ? null : hv.baselineBalancedLow,
-          hrvB2: hv === null ? null : hv.baselineBalancedUpper
-        };
-        DeviceStore.setCardCache(getContext(this).filesDir, last.tsb, last.ctl, last.atl, '', extra);
+        this.weekTss = wt;
+      }
 
       if (t.points.length >= 8) {
 
@@ -906,7 +982,7 @@ export struct StatusView {
           if (this.err.length > 0) {
             Column() {
               Text(this.err).fontSize(13).fontColor($r('app.color.danger'))
-              Button('重试').fontSize(13).margin({ top: 8 }).onClick(() => { this.load(false); })
+              Button('重试').fontSize(13).margin({ top: 8 }).onClick(() => { this.loadAll(); })
             }
             .padding(16).width('100%').backgroundColor($r('app.color.card_background_blur'))
             .border({ width: 1, color: $r('app.color.card_border_highlight') }).borderRadius(14)

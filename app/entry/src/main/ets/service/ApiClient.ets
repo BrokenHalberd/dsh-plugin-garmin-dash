@@ -89,6 +89,12 @@ export class ApiClient {
     return JSON.parse(t) as ActivityDetail;
   }
 
+  /** 聚合接口：一次拿到 trend/summary/hrv/hrvRange/bodyBattery/activities ✓ */
+  static async getBundle(days: number, date: string): Promise<BundleResult> {
+    const raw = await ApiClient.authedGet('/garmin-dash/api/bundle?days=' + days + '&date=' + date);
+    return JSON.parse(raw) as BundleResult;
+  }
+
   static async getTrend(days: number): Promise<Trend> {
     const t = await ApiClient.authedGet('/garmin-dash/api/trend?days=' + days);
     return JSON.parse(t) as Trend;
@@ -238,3 +244,16 @@ export class ApiClient {
   }
 }
 
+
+/** 聚合响应（各段可选，partial 标记失败的段） */
+export interface BundleResult {
+  date: string;
+  days: number;
+  partial: string[];
+  trend?: Trend;
+  summary?: Summary;
+  hrv?: HrvInfo;
+  hrvRange?: HrvRange;
+  bodyBattery?: BodyBattery;
+  activities?: Activity[];
+}
