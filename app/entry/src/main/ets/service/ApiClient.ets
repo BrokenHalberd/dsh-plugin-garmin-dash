@@ -90,8 +90,8 @@ export class ApiClient {
   }
 
   /** 聚合接口：一次拿到 trend/summary/hrv/hrvRange/bodyBattery/activities ✓ */
-  static async getBundle(days: number, date: string): Promise<BundleResult> {
-    const raw = await ApiClient.authedGet('/garmin-dash/api/bundle?days=' + days + '&date=' + date);
+  static async getBundle(days: number, date: string, parts: string): Promise<BundleResult> {
+    const raw = await ApiClient.authedGet('/garmin-dash/api/bundle?days=' + days + '&date=' + date + '&parts=' + parts);
     return JSON.parse(raw) as BundleResult;
   }
 
@@ -254,6 +254,7 @@ export interface BundleResult {
   summary?: Summary;
   hrv?: HrvInfo;
   hrvRange?: HrvRange;
+  curve?: CurveData;
   bodyBattery?: BodyBattery;
   activities?: Activity[];
 }

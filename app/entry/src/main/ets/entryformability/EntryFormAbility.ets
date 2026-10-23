@@ -1,4 +1,5 @@
 import { formBindingData, FormExtensionAbility, formProvider } from '@kit.FormKit';
+import { CardSync } from '../service/CardSync';
 import { Want } from '@kit.AbilityKit';
 import { http } from '@kit.NetworkKit';
 import { CardNet } from '../service/DeviceStore';
@@ -12,11 +13,24 @@ import { DeviceStore, CardExtra } from '../service/DeviceStore';
  */
 export default class EntryFormAbility extends FormExtensionAbility {
   onAddForm(want: Want): formBindingData.FormBindingData {
-    return EntryFormAbility.build(this.context.filesDir);
+    // 尽力记录 formId（不同版本参数键不同，逐个试，取到即记）
+    try {
+      const keys: string[] = ['ohos.extra.param.key.form_id', 'formId', 'ohos.extra.param.key.form_identity'];
+      for (let i = 0; i < keys.length; i++) {
+        const v = want.parameters === undefined ? undefined : want.parameters[keys[i]];
+        if (typeof v === 'string' && v.length > 0) {
+          CardSync.rememberFormId(this.context.filesDir, v as string);
+          break;
+        }
+      }
+    } catch (e) {
+    }
+    return CardSync.build(this.context.filesDir);
   }
 
   onUpdateForm(formId: string): void {
-    const data = EntryFormAbility.build(this.context.filesDir);
+    CardSync.rememberFormId(this.context.filesDir, formId);
+    const data = CardSync.build(this.context.filesDir);
     formProvider.updateForm(formId, data).catch(() => {
       // 忽略：卡片可能已被移除
     });
@@ -50,11 +64,11 @@ export default class EntryFormAbility extends FormExtensionAbility {
       if (frame > 8) {
         clearInterval(timer);
         this.refreshFromServer(formId).then(() => {
-          formProvider.updateForm(formId, EntryFormAbility.build(filesDir)).catch(() => {
+          formProvider.updateForm(formId, CardSync.build(filesDir)).catch(() => {
             // 忽略
           });
         }).catch(() => {
-          formProvider.updateForm(formId, EntryFormAbility.build(filesDir)).catch(() => {
+          formProvider.updateForm(formId, CardSync.build(filesDir)).catch(() => {
             // 忽略
           });
         });
@@ -117,13 +131,24 @@ export default class EntryFormAbility extends FormExtensionAbility {
         hrvNow: old.hrvNow.length === 0 ? null : Number(old.hrvNow),
         hrvLow: old.hrvLow.length === 0 ? null : Number(old.hrvLow),
         hrvB1: old.hrvB1.length === 0 ? null : Number(old.hrvB1),
-        hrvB2: old.hrvB2.length === 0 ? null : Number(old.hrvB2)
+        hrvB2: old.hrvB2.length === 0 ? null : Number(old.hrvB2),
+        calories: EntryFormAbility.numOf(old.calories),
+        stress: EntryFormAbility.numOf(old.stress)
       };
       DeviceStore.setCardCache(filesDir, last.tsb, last.ctl, last.atl, '', extra);
       return true;
     } catch (e) {
       return false;
     }
+  }
+
+  /** 字符串安全转数字（空/非法 → null ✓） */
+  private static numOf(v: string): number | null {
+    if (v === undefined || v === null || v.length === 0) {
+      return null;
+    }
+    const x = Number(v);
+    return Number.isFinite(x) ? x : null;
   }
 
   private static build(filesDir: string): formBindingData.FormBindingData {

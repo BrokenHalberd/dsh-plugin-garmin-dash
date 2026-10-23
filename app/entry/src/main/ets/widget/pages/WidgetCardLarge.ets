@@ -12,6 +12,8 @@ struct WidgetCardLarge {
   @LocalStorageProp('steps') steps: string = '';
   @LocalStorageProp('rhr') rhr: string = '';
   @LocalStorageProp('bb') bb: string = '';
+  @LocalStorageProp('calories') calories: string = '';
+  @LocalStorageProp('stress') stress: string = '';
   @LocalStorageProp('sleepDeep') sleepDeep: string = '';
   @LocalStorageProp('sleepLight') sleepLight: string = '';
   @LocalStorageProp('sleepRem') sleepRem: string = '';
@@ -184,6 +186,24 @@ struct WidgetCardLarge {
   }
 
   @Builder
+  metricCal() {
+    Column() {
+      Text('热量').fontSize(9).fontColor($r('app.color.text_tertiary'))
+      Text(this.st(this.calories)).fontSize(14).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
+    }
+    .alignItems(HorizontalAlign.Start).layoutWeight(1)
+  }
+
+  @Builder
+  metricStress() {
+    Column() {
+      Text('压力').fontSize(9).fontColor($r('app.color.text_tertiary'))
+      Text(this.st(this.stress)).fontSize(14).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
+    }
+    .alignItems(HorizontalAlign.Start).layoutWeight(1)
+  }
+
+  @Builder
   metricBb() {
     Column() {
       Text('电量').fontSize(9).fontColor($r('app.color.text_tertiary'))
@@ -233,6 +253,12 @@ struct WidgetCardLarge {
           this.metricBb()
         }
         .width('100%')
+
+        Row() {
+          this.metricCal()
+          this.metricStress()
+        }
+        .width('100%').margin({ top: 4 })
 
         // 睡眠分段条
         Row() {

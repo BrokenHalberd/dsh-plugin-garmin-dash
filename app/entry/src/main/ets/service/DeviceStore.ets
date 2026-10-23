@@ -39,6 +39,8 @@ export interface CardExtra {
   hrvLow: number | null;
   hrvB1: number | null;
   hrvB2: number | null;
+  calories: number | null;
+  stress: number | null;
 }
 
 /** 服务卡片展示用的缓存（由状态页刷新时写入） */
@@ -60,6 +62,8 @@ export interface CardCache {
   hrvLow: string;
   hrvB1: string;
   hrvB2: string;
+  calories: string;
+  stress: string;
 }
 
 const STORE_NAME: string = 'garmin_dash';
@@ -87,6 +91,57 @@ export class DeviceStore {
   /** 写卡片缓存到文件（卡片进程跨进程可读 ✓） */
 
   /** 卡片网络配置（卡片在独立进程，读不到 preferences，所以落盘 ✓） */
+  /** 追加一行崩溃/面包屑日志（失败静默，绝不影响主流程） */
+  static logCrash(filesDir: string, line: string): void {
+    try {
+      const path = filesDir + '/crash.log';
+      let old = '';
+      try {
+        const stat = fileIo.statSync(path);
+        if (stat.size > 0 && stat.size < 65536) {
+          const rf = fileIo.openSync(path, fileIo.OpenMode.READ_ONLY);
+          const buf = new ArrayBuffer(stat.size);
+          fileIo.readSync(rf.fd, buf);
+          fileIo.closeSync(rf);
+          old = buffer.from(buf).toString('utf-8');
+        }
+      } catch (e1) {
+      }
+      const text = old + line + '\n';
+      const f = fileIo.openSync(path, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+      fileIo.writeSync(f.fd, text.length > 60000 ? text.substring(text.length - 60000) : text);
+      fileIo.closeSync(f);
+    } catch (e) {
+    }
+  }
+
+  /** 读出崩溃日志（没有则空串） */
+  static readCrash(filesDir: string): string {
+    try {
+      const path = filesDir + '/crash.log';
+      const stat = fileIo.statSync(path);
+      if (stat.size <= 0) {
+        return '';
+      }
+      const rf = fileIo.openSync(path, fileIo.OpenMode.READ_ONLY);
+      const buf = new ArrayBuffer(stat.size);
+      fileIo.readSync(rf.fd, buf);
+      fileIo.closeSync(rf);
+      return buffer.from(buf).toString('utf-8');
+    } catch (e) {
+      return '';
+    }
+  }
+
+  /** 清空崩溃日志 */
+  static clearCrash(filesDir: string): void {
+    try {
+      const f = fileIo.openSync(filesDir + '/crash.log', fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+      fileIo.closeSync(f);
+    } catch (e) {
+    }
+  }
+
   static setCardNet(filesDir: string): void {
     const base = DeviceStore.getBaseUrl();
     const key = DeviceStore.getDeviceKey();
@@ -141,7 +196,9 @@ export class DeviceStore {
       hrvNow: safeRound(x.hrvNow, 0),
       hrvLow: safeRound(x.hrvLow, 0),
       hrvB1: safeRound(x.hrvB1, 0),
-      hrvB2: safeRound(x.hrvB2, 0)
+      hrvB2: safeRound(x.hrvB2, 0),
+      calories: safeRound(x.calories, 0),
+      stress: safeRound(x.stress, 0)
     };
     try {
       const f = fileIo.openSync(filesDir + '/card_cache.json',
@@ -161,7 +218,7 @@ export class DeviceStore {
     const fallback: CardCache = {
       tsb: '', ctl: '', atl: '', ride: '打开 App 同步数据', updated: '', weekTss: '',
       steps: '', rhr: '', bb: '', sleepDeep: '', sleepLight: '', sleepRem: '', sleepAwake: '',
-      hrvNow: '', hrvLow: '', hrvB1: '', hrvB2: ''
+      hrvNow: '', hrvLow: '', hrvB1: '', hrvB2: '', calories: '', stress: ''
     };
     try {
       const path = filesDir + '/card_cache.json';
@@ -175,6 +232,12 @@ export class DeviceStore {
         fileIo.readSync(f.fd, buf);
         const txt = buffer.from(buf).toString('utf-8');
         const o = JSON.parse(txt) as CardCache;
+        if (o.calories === undefined || o.calories === null) {
+          o.calories = '';
+        }
+        if (o.stress === undefined || o.stress === null) {
+          o.stress = '';
+        }
         return o;
       } finally {
         fileIo.closeSync(f);

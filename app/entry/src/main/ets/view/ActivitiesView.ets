@@ -1,5 +1,5 @@
 import { router } from '@kit.ArkUI';
-import { ApiClient } from '../service/ApiClient';
+import { ApiClient , BundleResult } from '../service/ApiClient';
 import { DeviceStore } from '../service/DeviceStore';
 import { Activity } from '../model/Types';
 import { Fmt } from '../util/Format';
@@ -62,6 +62,23 @@ export struct ActivitiesView {
     const key = 'activities:0';
     const cached = DeviceStore.cacheGet(key);
     let showed = false;
+    // 先用首页 bundle 缓存秒开（不阻塞首屏 ✓），网络请求继续在后台更新
+    if (this.items.length === 0) {
+      try {
+        const cachedAll = DeviceStore.cacheGet('bundle:all');
+        if (cachedAll.length > 10) {
+          const b = JSON.parse(cachedAll) as BundleResult;
+          if (b.activities !== undefined && b.activities !== null && b.activities.length > 0) {
+            this.items = b.activities;
+            this.hasMore = b.activities.length >= PAGE_SIZE;
+            this.staleNote = '缓存 · ' + Fmt.ago(DeviceStore.cacheAge('bundle:all')) + ' · 正在刷新…';
+            this.loading = false;
+            showed = true;
+          }
+        }
+      } catch (e0) {
+      }
+    }
     if (cached.length > 0) {
       this.items = JSON.parse(cached) as Activity[];
       this.staleNote = '缓存 · ' + Fmt.ago(DeviceStore.cacheAge(key)) + ' · 正在刷新…';

@@ -63,14 +63,15 @@ export struct MeView {
       if (amp >= 0) {
         rest = rest.substring(0, amp);
       }
-      code = rest.trim().toUpperCase();
+      const t1: string = rest === undefined || rest === null ? '' : rest.trim();
+      code = t1.toUpperCase();
       const q = raw.indexOf('?');
       if (q > 0) {
         base = raw.substring(0, q);
       }
     } else if (raw.length === 8) {
       // 只扫到配对码：沿用已保存的地址
-      code = raw.toUpperCase();
+      code = raw === undefined || raw === null ? '' : raw.toUpperCase();
     }
     if (code.length === 0) {
       return false;
@@ -108,7 +109,8 @@ export struct MeView {
     try {
       await ApiClient.health(this.baseUrl);
       this.msg = '地址可达，正在配对…';
-      const r: PairResult = await ApiClient.pair(this.baseUrl, this.pairCode.trim().toUpperCase());
+      const pc: string = this.pairCode === undefined || this.pairCode === null ? '' : this.pairCode.trim();
+      const r: PairResult = await ApiClient.pair(this.baseUrl, pc.toUpperCase());
       DeviceStore.savePair(r.deviceKey, r.deviceId);
       this.deviceId = r.deviceId;
       this.msg = '配对成功！设备密钥已保存，之后无需再配对';

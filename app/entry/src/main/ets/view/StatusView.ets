@@ -1,4 +1,7 @@
+import { common , errorManager } from '@kit.AbilityKit';
+import { CardSync } from '../service/CardSync';
 import { ApiClient, BundleResult } from '../service/ApiClient';
+import { StatCard, StatCardSize, CARD_GAP } from '../components/StatCard';
 import { DeviceStore, CardExtra } from '../service/DeviceStore';
 import { Summary, Trend, TrendPoint , HrvInfo , BodyBattery } from '../model/Types';
 import { Fmt } from '../util/Format';
@@ -10,13 +13,6 @@ import { Fmt } from '../util/Format';
  * 参数变化不会刷新 builder 内部的 UI**（曾经导致"翻日期只有睡眠条变、其余不动"）。
  * 按引用（对象）传递才会随状态更新，所以这里统一走对象。
  */
-interface StatCardCfg {
-  title: string;
-  value: string;
-  unit: string;
-  sub: string;
-}
-
 const COLOR_ACCENT: ResourceColor = $r('app.color.accent');
 const COLOR_WARN: ResourceColor = $r('app.color.warn');
 const COLOR_DANGER: ResourceColor = $r('app.color.danger');
@@ -49,14 +45,50 @@ export struct StatusView {
   @State bb: BodyBattery | null = null;
   @State lastTrend: TrendPoint | null = null;
   @State weekTss: number = 0;
+  @State crashText: string = '';
+  @State lastCardUpdated: string = '';
 
   aboutToAppear(): void {
+    // 读上次崩溃日志；有则显示在首页顶部（红色）
+    try {
+      const old = DeviceStore.readCrash(getContext(this).filesDir);
+      if (old.length > 0) {
+        // 只有真正的 JS 崩溃（[CRASH]）才显示；纯 [STEP] 面包屑属于被强杀，不算报错 ✓
+        const ci = old.indexOf('[CRASH]');
+        if (ci >= 0) {
+          this.crashText = old.substring(ci);
+          setTimeout(() => {
+            try {
+              this.crashText = '';
+            } catch (e0) {
+            }
+          }, 12000);
+        }
+        // 无论显示与否都清空（不再积累 ✓ 不用手点 ✓）
+        DeviceStore.clearCrash(getContext(this).filesDir);
+      }
+    } catch (e0) {
+    }
+    // 全局 JS 崩溃钩子：把栈写进文件，下次打开能看到
+    try {
+      errorManager.on('globalErrorOccurred', (err: errorManager.GlobalError) => {
+        try {
+          DeviceStore.logCrash(getContext(this).filesDir,
+            '[CRASH] ' + err.message);
+        } catch (e9) {
+        }
+      });
+    } catch (e8) {
+    }
+    // 先应用卡片侧可能更新的数据（反向同步 ✓）
+    this.syncFromCard();
     // 一次聚合请求拿全部（失败自动回退到分接口）
     this.loadAll();
   }
 
   onTick(): void {
-    // 与首屏一致：一次聚合请求（失败自动回退）
+    // 先看卡片是否已刷新过（反向同步 ✓），再拉一次最新
+    this.syncFromCard();
     this.loadAll();
   }
 
@@ -124,6 +156,34 @@ export struct StatusView {
   private stepsText(): string {
     const s = this.summary;
     return s === null ? '--' : Fmt.int(s.steps);
+  }
+
+  private calText(): string {
+    const s0 = this.summary;
+    return s0 === null || s0.calories === undefined ? '--' : Fmt.int(s0.calories);
+  }
+
+  private stressText(): string {
+    const s0 = this.summary;
+    return s0 === null || s0.stress === undefined ? '--' : Fmt.int(s0.stress);
+  }
+
+  private stressTextSub(): string {
+    const s0 = this.summary;
+    if (s0 === null || s0.stress === undefined || s0.stress === null) {
+      return '';
+    }
+    const v = s0.stress;
+    if (v < 26) {
+      return '放松';
+    }
+    if (v < 51) {
+      return '偏低';
+    }
+    if (v < 76) {
+      return '中等';
+    }
+    return '偏高';
   }
 
   private rhrText(): string {
@@ -203,29 +263,7 @@ export struct StatusView {
   }
 
   /** 状态卡：按引用传对象，状态变化才会刷新内部 UI */
-  @Builder
-  card(cfg: StatCardCfg) {
-    Column() {
-      Text(cfg.title).fontSize(12).fontColor($r('app.color.text_tertiary'))
-      Row() {
-        Text(cfg.value).fontSize(26).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
-        if (cfg.unit.length > 0) {
-          Text(cfg.unit).fontSize(12).fontColor($r('app.color.text_tertiary')).margin({ left: 3, bottom: 4 })
-        }
-      }
-      .alignItems(VerticalAlign.Bottom)
-      if (cfg.sub.length > 0) {
-        Text(cfg.sub).fontSize(11).fontColor($r('app.color.text_tertiary')).margin({ top: 2 })
-      }
-    }
-    .alignItems(HorizontalAlign.Start)
-    .padding(14)
-    .width('48%')
-    .backgroundColor($r('app.color.card_background_blur'))
-    .border({ width: 1, color: $r('app.color.card_border_highlight') })
-    .borderRadius(14)
-    .margin({ bottom: 10 })
-  }
+  
 
   /** 日期左右切换：无参构建器，状态在内部读（值参不刷新，血泪教训） */
   @Builder
@@ -300,14 +338,12 @@ export struct StatusView {
         this.legend($r('app.color.sleep_awake'), '清醒', 'awake')
       }
       .width('100%')
-      .margin({ top: 8 })
-    }
+      }
     .padding(14)
     .width('100%')
     .backgroundColor($r('app.color.card_background_blur'))
     .border({ width: 1, color: $r('app.color.card_border_highlight') })
     .borderRadius(14)
-    .margin({ bottom: 10 })
   }
 
   /** 载入今日表单：优先复用趋势页缓存，其次拉 30 天窗口 */
@@ -379,7 +415,8 @@ export struct StatusView {
 
   private hrvStatusText(): string {
     // Garmin 原始枚举 → 中文（BALANCED / UNBALANCED / LOW / HIGH）
-    const raw = this.hrv === null || this.hrv.status === null ? '' : this.hrv.status.toUpperCase();
+    const st1: string | null | undefined = this.hrv === null ? null : this.hrv.status;
+    const raw = (st1 === null || st1 === undefined) ? '' : st1.toUpperCase();
     if (raw === 'BALANCED') {
       return '平衡区';
     }
@@ -433,7 +470,8 @@ export struct StatusView {
     if (h === null || h.status === null) {
       return 'HRV 暂无数据：确保夜间佩戴手表，并在手表上开启 HRV 状态记录';
     }
-    const raw = h.status.toUpperCase();
+    const st2: string | null | undefined = h.status;
+    const raw = (st2 === null || st2 === undefined) ? '' : st2.toUpperCase();
     if (raw === 'BALANCED') {
       const t = this.tsb;
       const r = this.ramp;
@@ -484,24 +522,7 @@ export struct StatusView {
   }
 
   /** 身体电量卡：必须是无参 @Builder —— 按值传参的 builder 不会随状态刷新 */
-  @Builder
-  bbCard() {
-    Column() {
-      Text('Body Battery').fontSize(11).fontColor($r('app.color.text_tertiary'))
-      Row() {
-        Text(this.bbText()).fontSize(26).fontWeight(FontWeight.Bold).fontColor($r('app.color.accent'))
-        Text(' 最高').fontSize(10).fontColor($r('app.color.text_tertiary')).margin({ bottom: 4 })
-      }
-      .alignItems(VerticalAlign.Bottom)
-      Text(this.bbSubText()).fontSize(9).fontColor($r('app.color.text_hint'))
-    }
-    .alignItems(HorizontalAlign.Start)
-    .width('48%')
-    .padding(14)
-    .backgroundColor($r('app.color.card_background_blur'))
-    .border({ width: 1, color: $r('app.color.card_border_highlight') })
-    .borderRadius(14)
-  }
+  
 
 
   /** HRV 条：低区宽度（按 baselineLow 真实数值 ✓） */
@@ -614,10 +635,10 @@ export struct StatusView {
         .fontSize(9).fontColor(COLOR_HINT).width('100%').margin({ top: 4 })
     }
     .padding(14).width('100%')
+    .margin({ bottom: CARD_GAP })
     .backgroundColor(COLOR_CARD_BG)
     .border({ width: 1, color: COLOR_CARD_BORDER })
     .borderRadius(14)
-    .margin({ bottom: 10 })
   }
 
   private hrvWeeklyText(): string {
@@ -664,40 +685,200 @@ export struct StatusView {
   /** 从趋势数据里取最后一点的 CTL/ATL/TSB，并算 7 天 ramp */
 
   /** 一次请求拿全部；任一段为空则回退到对应分接口 */
-  private loadAll(): void {
-    ApiClient.getBundle(30, this.date)
-      .then((b: BundleResult) => {
-        if (b.trend !== undefined) {
-          this.applyTrend(JSON.stringify(b.trend));
+  /**
+   * 一次请求拿全部。任何异常都不允许冒泡（会闪退 ✗），一律回退到分接口。
+   */
+  /**
+   * 两段式加载：
+   * 第一段 parts=home（trend/summary/hrv/bodyBattery，约 3.5s）→ 立刻渲染首页 ✓
+   * 第二段 parts=extra（curve/hrvRange/activities，约 8s）→ 后台补齐并并入缓存 ✓ 不挡首屏
+   */
+  private watchdogSeq: number = 0;
+
+  /**
+   * 反向同步：卡片自己刷新过（写了 card_cache.json ✓），App 这边也跟上 ✓
+   * 只更新卡片覆盖到的字段，不覆盖 App 独有的数据 ✓
+   */
+  private syncFromCard(): void {
+    try {
+      const c = DeviceStore.getCardCache(getContext(this).filesDir);
+      if (c.updated === undefined || c.updated === null || c.updated.length === 0) {
+        return;
+      }
+      if (c.updated === this.lastCardUpdated) {
+        return;
+      }
+      const n1 = (v: string): number | null => {
+        if (v === undefined || v === null || v.length === 0) {
+          return null;
         }
-        if (b.summary !== undefined) {
-          this.summary = b.summary;
-          this.err = '';
-          this.staleNote = '';
-        }
-        if (b.hrv !== undefined) {
-          this.hrv = b.hrv;
-          this.hrvErr = '';
-        }
-        if (b.bodyBattery !== undefined) {
-          this.bb = b.bodyBattery;
-        }
-        this.loading = false;
-        this.refreshing = false;
-        if (b.partial.length > 0) {
-          this.staleNote = '部分数据缺失：' + b.partial.join('、');
-        }
-        this.writeCardCache(b);
-      })
-      .catch((e: Object) => {
-        // 回退：老的四路请求（保底可用 ✓）
-        this.staleNote = '聚合失败，已回退：' + ApiClient.friendly(e);
-        this.loadHrv(false);
-        this.loadBb();
-        this.load(false);
-        this.loadForm();
-      });
+        const x = Number(v);
+        return Number.isFinite(x) ? x : null;
+      };
+      const tsb = n1(c.tsb);
+      const ctl = n1(c.ctl);
+      const atl = n1(c.atl);
+      if (tsb !== null) {
+        this.tsb = tsb;
+      }
+      if (ctl !== null) {
+        this.ctl = ctl;
+      }
+      if (atl !== null) {
+        this.atl = atl;
+      }
+      this.lastCardUpdated = c.updated;
+    } catch (e) {
+    }
   }
+
+  private loadAll(): void {
+    try {
+      this.loading = true;
+      this.refreshing = false;
+      // 看门狗：25 秒内无论成功失败，必须结束转圈（绝不无限卡 ✓）
+      this.watchdogSeq = this.watchdogSeq + 1;
+      const mySeq = this.watchdogSeq;
+      setTimeout(() => {
+        try {
+          if (mySeq === this.watchdogSeq && (this.loading || this.refreshing)) {
+            this.loading = false;
+            this.refreshing = false;
+            this.staleNote = '刷新超时（25 秒），请下拉重试';
+          }
+        } catch (eW) {
+        }
+      }, 25000);
+      try {
+        DeviceStore.logCrash(getContext(this).filesDir, '[STEP] loadAll start date=' + this.date);
+      } catch (e00) {
+      }
+      ApiClient.getBundle(30, this.date, 'home')
+        .then((b: BundleResult) => {
+          try {
+            try {
+              DeviceStore.logCrash(getContext(this).filesDir, '[STEP] home arrived');
+            } catch (e01) {
+            }
+            this.applyBundleHome(b);
+            // 首页数据先落缓存（此时只有 home 段）
+            try {
+              DeviceStore.cachePut('bundle:all', JSON.stringify(b));
+            } catch (e0) {
+            }
+            try {
+              this.writeCardCache(b);
+            } catch (e2) {
+              this.staleNote = '卡片缓存写入失败';
+            }
+          } catch (e1) {
+            this.loading = false;
+            this.refreshing = false;
+            this.fallbackLoad();
+          }
+          // 第二段：不等待，后台补慢数据
+          this.loadExtra(30, this.date);
+        })
+        .catch((e: Object) => {
+          this.staleNote = '聚合失败，已回退：' + ApiClient.friendly(e);
+          this.loading = false;
+          this.refreshing = false;
+          this.fallbackLoad();
+          // 首页失败也尝试后台补（可能只是首页那段超时）
+          this.loadExtra(30, this.date);
+        });
+    } catch (e) {
+      this.loading = false;
+      this.refreshing = false;
+      this.fallbackLoad();
+    }
+  }
+
+  /** 把 home 段应用到界面 */
+  private applyBundleHome(b: BundleResult): void {
+    if (b.trend !== undefined && b.trend !== null && b.trend.points !== undefined
+      && b.trend.points.length > 0) {
+      this.applyTrend(JSON.stringify(b.trend));
+    }
+    if (b.summary !== undefined && b.summary !== null) {
+      this.summary = b.summary;
+      this.err = '';
+      this.staleNote = '';
+    }
+    if (b.hrv !== undefined && b.hrv !== null) {
+      this.hrv = b.hrv;
+      this.hrvErr = '';
+    }
+    if (b.bodyBattery !== undefined && b.bodyBattery !== null) {
+      this.bb = b.bodyBattery;
+    }
+    this.loading = false;
+    this.refreshing = false;
+    const miss = (b.partial === undefined || b.partial === null) ? 0 : b.partial.length;
+    if (miss > 0) {
+      this.staleNote = '部分数据缺失：' + b.partial.join('、');
+    }
+  }
+
+  /** 后台补 slow 段（curve/hrvRange/activities），并入 bundle:all 缓存供其它页秒开 */
+  private loadExtra(days: number, date: string): void {
+    try {
+      try {
+        DeviceStore.logCrash(getContext(this).filesDir, '[STEP] loadExtra start');
+      } catch (e02) {
+      }
+      ApiClient.getBundle(90, date, 'extra')
+        .then((x: BundleResult) => {
+          try {
+            const cached = DeviceStore.cacheGet('bundle:all');
+            let merged: BundleResult = x;
+            if (cached.length > 10) {
+              try {
+                merged = JSON.parse(cached) as BundleResult;
+              } catch (e7) {
+              }
+            }
+            if (x.curve !== undefined) {
+              merged.curve = x.curve;
+            }
+            if (x.hrvRange !== undefined) {
+              merged.hrvRange = x.hrvRange;
+            }
+            if (x.activities !== undefined) {
+              merged.activities = x.activities;
+            }
+            DeviceStore.cachePut('bundle:all', JSON.stringify(merged));
+          } catch (e6) {
+          }
+        })
+        .catch((e: Object) => {
+        });
+    } catch (e) {
+    }
+  }
+
+
+
+  /** 回退到四路老接口（每一步都自带异常保护） */
+  private fallbackLoad(): void {
+    try {
+      this.loadHrv(false);
+    } catch (e) {
+    }
+    try {
+      this.loadBb();
+    } catch (e) {
+    }
+    try {
+      this.load(false);
+    } catch (e) {
+    }
+    try {
+      this.loadForm();
+    } catch (e) {
+    }
+  }
+
 
   /**
    * 把当前已就绪的所有状态写入桌面卡片缓存。
@@ -715,6 +896,7 @@ export struct StatusView {
    * 把 bundle 里的数据直接写入卡片缓存（不依赖任何 this.* 状态 ✓ 彻底避免时序问题）。
    */
   private writeCardCache(b: BundleResult): void {
+    try {
     const trend = b.trend;
     if (trend === undefined || trend.points.length === 0) {
       return;
@@ -737,6 +919,8 @@ export struct StatusView {
     const extra: CardExtra = {
       weekTss: this.nz(wt),
       steps: (s === undefined || s === null) ? null : this.nz(s.steps),
+      calories: (s === undefined || s === null) ? null : this.nz(s.calories),
+      stress: (s === undefined || s === null) ? null : this.nz(s.stress),
       rhr: (s === undefined || s === null) ? null : this.nz(s.restingHeartRate),
       bb: bbValue,
       sleepDeep: sl === null ? null : this.nz(sl.deepMinutes),
@@ -750,6 +934,14 @@ export struct StatusView {
     };
     DeviceStore.setCardNet(getContext(this).filesDir);
     DeviceStore.setCardCache(getContext(this).filesDir, last.tsb, last.ctl, last.atl, '', extra);
+    // 主动推给桌面卡片：App 刷新完，卡片立刻跟着变 ✓
+    try {
+      CardSync.pushToCards(getContext(this).filesDir);
+    } catch (ePush) {
+    }
+      } catch (e) {
+      // 卡片缓存写入失败绝不影响 App
+    }
   }
 
   private applyTrend(json: string): void {
@@ -942,6 +1134,7 @@ export struct StatusView {
     }
 
     .padding(14).width('100%')
+    .margin({ bottom: CARD_GAP })
 
     .backgroundColor($r('app.color.card_background_blur'))
 
@@ -949,7 +1142,6 @@ export struct StatusView {
 
     .borderRadius(14)
 
-    .margin({ bottom: 10 })
 
   }
 
@@ -973,6 +1165,20 @@ export struct StatusView {
           this.formCard()
           this.hrvCard()
 
+          if (this.crashText.length > 0) {
+            Column() {
+              Text('⚠ 上次崩溃日志（点此清空）').fontSize(10).fontColor('#FFFFFF')
+              Text(this.crashText).fontSize(8).fontColor('#FFE0E0').maxLines(14)
+            }
+            .width('100%').padding(8).backgroundColor('#B3261E').borderRadius(6).margin({ bottom: 6 })
+            .onClick(() => {
+              try {
+                DeviceStore.clearCrash(getContext(this).filesDir);
+              } catch (e) {
+              }
+              this.crashText = '';
+            })
+          }
           if (this.staleNote.length > 0) {
             Text(this.staleNote).fontSize(11).fontColor($r('app.color.banner_text'))
               .width('100%').padding(8)
@@ -984,7 +1190,8 @@ export struct StatusView {
               Text(this.err).fontSize(13).fontColor($r('app.color.danger'))
               Button('重试').fontSize(13).margin({ top: 8 }).onClick(() => { this.loadAll(); })
             }
-            .padding(16).width('100%').backgroundColor($r('app.color.card_background_blur'))
+            .padding(16).width('100%')
+            .backgroundColor($r('app.color.card_background_blur'))
             .border({ width: 1, color: $r('app.color.card_border_highlight') }).borderRadius(14)
           }
 
@@ -997,12 +1204,37 @@ export struct StatusView {
           }
 
           if (this.summary !== null) {
-            Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.SpaceBetween }) {
-              this.card({ title: '步数', value: this.stepsText(), unit: '步', sub: '' })
-              this.card({ title: '静息心率', value: this.rhrText(), unit: 'bpm', sub: '' })
-              this.card({ title: '睡眠', value: this.sleepText(), unit: '', sub: this.sleepScoreText() })
-              this.bbCard()
+            Grid() {
+              GridItem() {
+                StatCard({ title: '步数', value: this.stepsText(), unit: '步' })
+              }
+              GridItem() {
+                StatCard({ title: '静息心率', value: this.rhrText(), unit: 'bpm' })
+              }
+              GridItem() {
+                StatCard({ title: '睡眠', value: this.sleepText(), sub: this.sleepScoreText() })
+              }
+              GridItem() {
+                StatCard({
+                  title: 'Body Battery',
+                  value: this.bbText(),
+                  suffix: ' 最高',
+                  accent: true,
+                  sub: this.bbSubText()
+                })
+              }
+              GridItem() {
+                StatCard({ title: '热量', value: this.calText(), unit: 'kcal' })
+              }
+              GridItem() {
+                StatCard({ title: '压力', value: this.stressText(), sub: this.stressTextSub() })
+              }
             }
+            .columnsTemplate('1fr 1fr')
+            .columnsGap(CARD_GAP)
+            .rowsGap(CARD_GAP)
+            .alignItems(GridItemAlignment.STRETCH)
+            .margin({ bottom: CARD_GAP })
             .width('100%')
 
             if (this.summary.sleep !== null) {
@@ -1016,7 +1248,7 @@ export struct StatusView {
         .width('100%')
         .constraintSize({ minHeight: '100%' })
         .justifyContent(FlexAlign.Start)
-        .padding({ left: 12, right: 12 })
+        .padding({ left: 12, right: 12, bottom: 96 })
         .alignItems(HorizontalAlign.Start)
       }
       .scrollBar(BarState.Off)

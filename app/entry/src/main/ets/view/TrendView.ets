@@ -1,6 +1,6 @@
 import { common } from '@kit.AbilityKit';
 import { inputMethod } from '@kit.IMEKit';
-import { ApiClient } from '../service/ApiClient';
+import { ApiClient , BundleResult } from '../service/ApiClient';
 import { DeviceStore } from '../service/DeviceStore';
 import { Activity, ActivityDetail, Summary, Trend, TrendPoint, WeeklyTotal , HrvRange , HrvDay , CurveData } from '../model/Types';
 import { Fmt } from '../util/Format';
@@ -223,7 +223,86 @@ export struct TrendView {
   private curveCtx: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.curveSettings);
   private refSettings: RenderingContextSettings = new RenderingContextSettings(true);
   private refCtx: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.refSettings);
+  /**
+   * 趋势页一次拿全部：trend + curve + hrvRange（都来自 /api/bundle ✓）。
+   * 任何异常都不许冒泡（会闪退 ✗），失败则回落到各页自己的加载器。
+   */
+  /** 把 bundle 的各段应用到趋势页（缓存与网络共用 ✓） */
+  private applyBundle(b: BundleResult): void {
+    try {
+      if (b.trend !== undefined && b.trend !== null && b.trend.points !== undefined
+        && b.trend.points.length > 0) {
+        this.trend = b.trend;
+        try {
+          DeviceStore.cachePut('trend:90', JSON.stringify(b.trend));
+        } catch (e7) {
+        }
+        this.drawPmc();
+      }
+      if (b.curve !== undefined && b.curve !== null) {
+        try {
+          this.applyCurve(JSON.stringify(b.curve));
+        } catch (e6) {
+        }
+      }
+      if (b.hrvRange !== undefined && b.hrvRange !== null) {
+        this.hrvRange = b.hrvRange;
+      }
+    } catch (e5) {
+    }
+  }
+
+  private loadAllTrend(): void {
+    try {
+      // ① 先用首页缓存秒开（首页刷新时已把整个 bundle 落盘 ✓）
+      try {
+        const cached = DeviceStore.cacheGet('bundle:all');
+        if (cached.length > 10) {
+          this.applyBundle(JSON.parse(cached) as BundleResult);
+          this.staleNote = '缓存 · ' + Fmt.ago(DeviceStore.cacheAge('bundle:all')) + ' · 正在刷新…';
+        }
+      } catch (e0) {
+      }
+      ApiClient.getBundle(90, Fmt.today(), 'all')
+        .then((b: BundleResult) => {
+          try {
+            if (b.trend !== undefined && b.trend !== null && b.trend.points !== undefined
+              && b.trend.points.length > 0) {
+              this.trend = b.trend;
+              try {
+                DeviceStore.cachePut('trend:90', JSON.stringify(b.trend));
+              } catch (e9) {
+              }
+              this.drawPmc();
+            }
+            if (b.curve !== undefined && b.curve !== null) {
+              try {
+                this.applyCurve(JSON.stringify(b.curve));
+              } catch (e8) {
+              }
+            }
+            if (b.hrvRange !== undefined && b.hrvRange !== null) {
+              this.hrvRange = b.hrvRange;
+            }
+            this.loading = false;
+            this.refreshing = false;
+          } catch (e1) {
+            this.loading = false;
+            this.refreshing = false;
+          }
+        })
+        .catch((e: Object) => {
+          this.loading = false;
+          this.refreshing = false;
+        });
+    } catch (e) {
+      this.loading = false;
+      this.refreshing = false;
+    }
+  }
+
   aboutToAppear(): void {
+    this.loadAllTrend();
     this.dark = Theme.isDark(getContext(this) as common.UIAbilityContext);
     try {
       const cfg = (getContext(this) as common.UIAbilityContext).config;
@@ -266,6 +345,13 @@ export struct TrendView {
       this.loading = true;
     }
     this.err = '';
+    if (this.trend !== null) {
+      // bundle 已给过数据，直接跳过（避免重复请求 ✓）
+      this.staleNote = '';
+      this.loading = false;
+      this.refreshing = false;
+      return;
+    }
     ApiClient.getTrend(90)
       .then((t: Trend) => {
         this.trend = t;
@@ -298,6 +384,10 @@ export struct TrendView {
     }
     if (!DeviceStore.isPaired()) {
       this.curveErr = '尚未配对';
+      return;
+    }
+    if (this.curveReady) {
+      // bundle 已给过曲线 ✓
       return;
     }
     this.curveLoading = true;
@@ -1965,6 +2055,11 @@ export struct TrendView {
       return;
     }
     if (!DeviceStore.isPaired()) {
+      return;
+    }
+    if (this.hrvRange !== null) {
+      // bundle 已给过 HRV 区间 ✓
+      this.hrvLoading = false;
       return;
     }
     this.hrvLoading = true;

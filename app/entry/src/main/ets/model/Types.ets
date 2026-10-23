@@ -25,6 +25,10 @@ export interface Summary {
   sleep: SleepInfo | null;
   weight: WeightInfo | null;
   bodyBattery: number | null;
+  calories?: number | null;
+  activeCalories?: number | null;
+  stress?: number | null;
+  maxStress?: number | null;
 }
 
 export interface Activity {
