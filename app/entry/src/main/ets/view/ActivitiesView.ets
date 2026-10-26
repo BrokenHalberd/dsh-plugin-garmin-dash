@@ -404,6 +404,7 @@ export struct ActivitiesView {
         }
         .layoutWeight(1)
         .width('100%')
+        .contentEndOffset(108)
         .scrollBar(BarState.Off)
       }
       .width('100%')

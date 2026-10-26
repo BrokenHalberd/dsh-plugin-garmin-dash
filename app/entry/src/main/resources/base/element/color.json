@@ -107,6 +107,34 @@
     {
       "name": "warn",
       "value": "#C77700"
+    },
+    {
+      "name": "glass_fill",
+      "value": "#26FFFFFF"
+    },
+    {
+      "name": "glass_fill_strong",
+      "value": "#40FFFFFF"
+    },
+    {
+      "name": "glass_fill_chip",
+      "value": "#33FFFFFF"
+    },
+    {
+      "name": "glass_border_highlight",
+      "value": "#8CFFFFFF"
+    },
+    {
+      "name": "glass_shadow",
+      "value": "#1F1B2A4A"
+    },
+    {
+      "name": "glass_tint_icon",
+      "value": "#2F6FED"
+    },
+    {
+      "name": "glass_fill_subtle",
+      "value": "#0DFFFFFF"
     }
   ]
 }

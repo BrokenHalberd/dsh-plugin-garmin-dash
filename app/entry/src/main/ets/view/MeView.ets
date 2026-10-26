@@ -347,7 +347,7 @@ export struct MeView {
     }
     .width('100%')
 
-    .padding({ left: 12, right: 12 })
+    .padding({ left: 12, right: 12, bottom: 108 })
     .alignItems(HorizontalAlign.Start)
     }
     .scrollBar(BarState.Off)

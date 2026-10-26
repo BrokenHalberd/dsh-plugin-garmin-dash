@@ -161,6 +161,8 @@ const BOTTOM_BAR_PAD: number = 104;
 @Component
 export struct TrendView {
   @Prop @Watch('onTick') tick: number = 0;
+  /** 面板滑到头时回调外层：+1 下一大页 / -1 上一大页（对齐 ClashBox 代理页行为） */
+  onSwipeOut: (delta: number) => void = (delta: number) => {};
   @State trend: Trend | null = null;
   @State panel: string = 'overview';
   @State loading: boolean = false;
@@ -219,6 +221,8 @@ export struct TrendView {
   private fontScale: number = 1;
   private settings: RenderingContextSettings = new RenderingContextSettings(true);
   private ctx: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.settings);
+  /** chip 行滚动控制器：切面板时把激活 chip 滚进视野 */
+  private chipScroller: Scroller = new Scroller();
   private curveSettings: RenderingContextSettings = new RenderingContextSettings(true);
   private curveCtx: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.curveSettings);
   private refSettings: RenderingContextSettings = new RenderingContextSettings(true);
@@ -229,6 +233,18 @@ export struct TrendView {
    */
   /** 把 bundle 的各段应用到趋势页（缓存与网络共用 ✓） */
   private applyBundle(b: BundleResult): void {
+    // 首页刷新时后端已把静息心率一起下发（parts=extra），这里直接用，不再打 14 次 /summary
+    if (b.recovery !== undefined && b.recovery !== null && b.recovery.vals !== undefined
+      && b.recovery.vals.length > 0) {
+      this.rhrDays = b.recovery.days;
+      this.rhrValues = b.recovery.vals;
+      this.rhrReady = true;
+      this.rhrLoading = false;
+      try {
+        DeviceStore.cachePut('recovery:14', JSON.stringify({ days: b.recovery.days, vals: b.recovery.vals }));
+      } catch (eR) {
+      }
+    }
     try {
       if (b.trend !== undefined && b.trend !== null && b.trend.points !== undefined
         && b.trend.points.length > 0) {
@@ -311,6 +327,9 @@ export struct TrendView {
       this.fontScale = 1;
     }
     this.load(false);
+    // 后台静默拉「功率曲线」和「健康恢复」，不再需要手动点按钮（两者内部都有 loading 守卫与缓存）
+    this.loadCurve();
+    this.loadRecovery();
   }
 
   onTick(): void {
@@ -846,6 +865,28 @@ export struct TrendView {
           this.curveCtx.fillText(lbl, Math.max(padL, xOf(k) - font), h - 6);
         }
       }
+    }
+  }
+
+  /** 面板前后翻页（滑动切换用）：越界直接忽略，保证首尾不越界 */
+  private switchPanel(delta: number): void {
+    let cur = 0;
+    for (let k = 0; k < PANELS.length; k++) {
+      if (PANELS[k].key === this.panel) {
+        cur = k;
+        break;
+      }
+    }
+    const next = cur + delta;
+    if (next < 0 || next >= PANELS.length) {
+      // 面板已到头 → 把滑动意图交给外层（切换大页面），对齐 ClashBox 代理页
+      this.onSwipeOut(delta);
+      return;
+    }
+    this.panel = PANELS[next].key;
+    try {
+      this.chipScroller.scrollToIndex(next);
+    } catch (eC) {
     }
   }
 
@@ -2176,6 +2217,10 @@ export struct TrendView {
   /** 载入近 14 天静息心率（逐日 /summary；命中缓存则不请求） */
   private loadRecovery(): void {
     this.loadHrvRange();
+    // 首页 bundle 已经带下来就直接用（rhrReady=true），不再打 14 次 /summary
+    if (this.rhrReady && this.rhrValues.length > 0) {
+      return;
+    }
     if (this.rhrLoading) {
       return;
     }
@@ -2589,14 +2634,14 @@ export struct TrendView {
           }
           .width('100%').padding({ bottom: 8 })
 
-          Scroll() {
-            Row({ space: 8 }) {
-              ForEach(PANELS, (p: PanelDef) => {
+          List({ space: 8, scroller: this.chipScroller }) {
+            ForEach(PANELS, (p: PanelDef) => {
+              ListItem() {
                 this.panelChip(p)
-              }, (p: PanelDef) => p.key)
-            }
+              }
+            }, (p: PanelDef) => p.key)
           }
-          .scrollable(ScrollDirection.Horizontal)
+          .listDirection(Axis.Horizontal)
           .scrollBar(BarState.Off)
           .width('100%')
           .padding({ bottom: 10 })
@@ -2643,7 +2688,18 @@ export struct TrendView {
         .width('100%')
         .constraintSize({ minHeight: '100%' })
         .justifyContent(FlexAlign.Start)
-        .padding({ left: 12, right: 12 })
+        // 横向滑动切换面板（PanDirection.Horizontal 只收横向，纵向滚动/下拉刷新不受影响）
+        .gesture(
+          PanGesture({ direction: PanDirection.Horizontal, distance: 40 })
+            .onActionEnd((e: GestureEvent) => {
+              if (e.offsetX < -40) {
+                this.switchPanel(1);
+              } else if (e.offsetX > 40) {
+                this.switchPanel(-1);
+              }
+            })
+        )
+        .padding({ left: 12, right: 12, bottom: 108 })
         .alignItems(HorizontalAlign.Start)
       }
       .scrollBar(BarState.Off)

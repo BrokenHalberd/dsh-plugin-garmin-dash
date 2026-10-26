@@ -246,6 +246,11 @@ export class ApiClient {
 
 
 /** 聚合响应（各段可选，partial 标记失败的段） */
+export interface RecoverySeries {
+  days: string[];
+  vals: number[];
+}
+
 export interface BundleResult {
   date: string;
   days: number;
@@ -257,4 +262,6 @@ export interface BundleResult {
   curve?: CurveData;
   bodyBattery?: BodyBattery;
   activities?: Activity[];
+  /** 近 N 天静息心率（后端 /api/bundle?parts=extra 一次性下发） */
+  recovery?: RecoverySeries;
 }

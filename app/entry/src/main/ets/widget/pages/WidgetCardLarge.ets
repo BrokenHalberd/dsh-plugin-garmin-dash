@@ -86,19 +86,24 @@ struct WidgetCardLarge {
     return '睡眠 ' + h + 'h' + (m < 10 ? '0' + m : '' + m);
   }
 
+  /** 白线位置：与 App 的 StatusView.hrvMarkerPct() 完全一致
+   *  整条 = 0 ~ (balancedUpper + 20)，即「低区 0→baselineLow、平衡区 →balancedUpper、高区 +20」
+   *  之前用的是 (now - lo) / (b2 - lo)，相当于只在基线区间里定位，和 App 的整条比例对不上 */
   private hrvPct(): number {
-    const lo = this.num(this.hrvLow);
-    const hi = this.num(this.hrvB2);
-    const now = this.num(this.hrvNow);
-    if (hi <= lo || this.hrvNow.length === 0) {
+    if (this.hrvNow.length === 0) {
       return -1;
     }
-    let p = ((now - lo) / (hi - lo)) * 100;
-    if (p < 0) {
-      p = 0;
+    const b2 = this.num(this.hrvB2);
+    const total = b2 + 20;
+    if (total <= 0) {
+      return -1;
     }
-    if (p > 100) {
-      p = 100;
+    let p = (this.num(this.hrvNow) / total) * 100;
+    if (p < 2) {
+      p = 2;
+    }
+    if (p > 98) {
+      p = 98;
     }
     return Math.round(p);
   }

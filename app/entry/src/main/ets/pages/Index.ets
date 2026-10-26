@@ -30,7 +30,7 @@ const BOTTOM_BAR_PAD: number = 104;
 @Component
 struct Index {
   private context = getContext(this) as common.UIAbilityContext;
-  private controller: TabsController = new TabsController();
+  private controller: SwiperController = new SwiperController();
   /** 右手时圆键需要向右平移的距离（vp） */
   private shiftX: number = 0;
   /** 上一次已生效的握持手：0 未知 / 1 左手 / 2 右手 */
@@ -157,7 +157,8 @@ struct Index {
 
   private switchTo(idx: number): void {
     this.currentTab = idx;
-    this.controller.changeIndex(idx);
+    this.currentTab = idx;
+    this.controller.changeIndex(idx, true);
     this.tick = this.tick + 1;
   }
 
@@ -173,8 +174,9 @@ struct Index {
         .fontSize(21)
         .fontColor([this.currentTab === idx ? $r('app.color.accent') : $r('app.color.text_tertiary')])
         .renderingStrategy(SymbolRenderingStrategy.MULTIPLE_OPACITY)
-        .translate({ y: this.currentTab === idx ? -2 : 0 })
-        .animation({ duration: 220, curve: Curve.EaseOut })
+        .scale({ x: this.currentTab === idx ? 1.12 : 1, y: this.currentTab === idx ? 1.12 : 1 })
+        .translate({ y: this.currentTab === idx ? -1 : 0 })
+        .animation({ duration: 320, curve: Curve.Friction })
 
       Text(title)
         .fontSize(10)
@@ -182,7 +184,11 @@ struct Index {
         .fontWeight(this.currentTab === idx ? FontWeight.Medium : FontWeight.Normal)
     }
     .layoutWeight(1)
-    .height(58)
+    .height(52)
+    .margin({ left: 4, right: 4, top: 6, bottom: 6 })
+    .borderRadius(100)
+    .backgroundColor(this.currentTab === idx ? $r('app.color.glass_fill_strong') : Color.Transparent)
+    .animation({ duration: 320, curve: Curve.Friction })
     .onClick(() => { this.switchTo(idx); })
   }
 
@@ -191,17 +197,19 @@ struct Index {
   dshButton() {
     Column() {
       SymbolGlyph($r('sys.symbol.ellipsis_message_fill'))
-        .fontSize(26)
-        .fontColor([$r('app.color.accent_on')])
+        .fontSize(25)
+        .fontColor([$r('app.color.accent')])
     }
-    .width(58)
-    .height(58)
-    .borderRadius(100)
+    .width(60)
+    .height(60)
+    .borderRadius(30)
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
-    .backgroundColor($r('app.color.accent'))
-    .border({ width: 1, color: $r('app.color.card_border_highlight') })
-    .shadow({ radius: 14, color: $r('app.color.accent'), offsetY: 5, type: ShadowType.BLUR })
+    // 液态玻璃：模糊底 + 半透明填充 + 1px 高光边 + 柔和外影（不是实色填充）
+    .backgroundBlurStyle(BlurStyle.Thin)
+    .backgroundColor($r('app.color.glass_fill_subtle'))
+    .border({ width: 0.5, color: $r('app.color.glass_border_highlight') })
+    .shadow({ radius: 18, color: $r('app.color.glass_shadow'), offsetY: 8, type: ShadowType.BLUR })
     .clickEffect({ level: ClickEffectLevel.MIDDLE, scale: 0.92 })
     .onClick(() => {
       router.pushUrl({ url: 'pages/DshChatPage' });
@@ -210,45 +218,47 @@ struct Index {
 
   build() {
     Stack({ alignContent: Alignment.Bottom }) {
-      Tabs({ barPosition: BarPosition.End, index: this.currentTab, controller: this.controller }) {
-        TabContent() {
-          Column() {
-            StatusView({ tick: this.tick })
-          }
-          .width('100%').height('100%')
-          .padding({ bottom: BOTTOM_BAR_PAD })
+      Swiper(this.controller) {
+        Column() {
+          StatusView({ tick: this.tick })
         }
-        .tabBar('')
+        .width('100%').height('100%')
 
-        TabContent() {
-          Column() {
-            ActivitiesView({ tick: this.tick })
-          }
-          .width('100%').height('100%')
-          .padding({ bottom: BOTTOM_BAR_PAD })
+        Column() {
+          ActivitiesView({ tick: this.tick })
         }
-        .tabBar('')
+        .width('100%').height('100%')
 
-        TabContent() {
-          Column() {
-            TrendView({ tick: this.tick })
-          }
-          .width('100%').height('100%')
-          .padding({ bottom: BOTTOM_BAR_PAD })
+        Column() {
+          TrendView({
+            tick: this.tick,
+            onSwipeOut: (delta: number) => {
+              const t = this.currentTab + delta;
+              if (t >= 0 && t <= 3) {
+                this.switchTo(t);
+              }
+            }
+          })
         }
-        .tabBar('')
+        .width('100%').height('100%')
 
-        TabContent() {
-          Column() {
-            MeView({ onChanged: () => { this.tick = this.tick + 1; } })
-          }
-          .width('100%').height('100%')
-          .padding({ bottom: BOTTOM_BAR_PAD })
+        Column() {
+          MeView({ onChanged: () => { this.tick = this.tick + 1; } })
         }
-        .tabBar('')
+        .width('100%').height('100%')
       }
-      .barHeight(0)
-      .scrollable(true)
+      .index(this.currentTab)
+      .loop(false)
+      // 趋势页(索引2)交给内层面板先滑，到头由 onSwipeOut 回调切大页（对齐 ClashBox）
+      .disableSwipe(this.currentTab === 2)
+      // 对齐 ClashBox ProxyPage：内层 Scroll 先处理纵向，Swiper 只接横向
+      .nestedScroll(SwiperNestedScrollMode.SELF_FIRST)
+      .cachedCount(0)
+      .indicator(false)
+      .duration(280)
+      .curve(Curve.Friction)
+      .effectMode(EdgeEffect.None)
+      .itemSpace(0)
       .onChange((index: number) => {
         this.currentTab = index;
         this.tick = this.tick + 1;
@@ -276,14 +286,14 @@ struct Index {
         this.tabItem('趋势', $r('sys.symbol.rectangle_portrait_wave_2'), 2)
         this.tabItem('我的', $r('sys.symbol.person_crop_circle_fill_1'), 3)
       }
-      .width('94%')
-      .height(58)
-      .margin({ bottom: 10 + this.bottomInset })
-      .backdropBlur(30)
-      .backgroundColor($r('app.color.tab_background_blur'))
-      .borderRadius(29)
-      .border({ width: 1, color: $r('app.color.card_border_highlight') })
-      .shadow({ radius: 22, color: $r('app.color.shadow'), offsetY: 8 })
+      .width('93%')
+      .height(64)
+      .margin({ bottom: 12 + this.bottomInset })
+      .backgroundBlurStyle(BlurStyle.Thin)
+      .backgroundColor($r('app.color.glass_fill_subtle'))
+      .borderRadius(32)
+      .border({ width: 0.5, color: $r('app.color.glass_border_highlight') })
+      .shadow({ radius: 26, color: $r('app.color.glass_shadow'), offsetY: 12, type: ShadowType.BLUR })
     }
     .width('100%')
     .height('100%')

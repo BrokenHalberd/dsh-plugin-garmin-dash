@@ -761,6 +761,15 @@ export struct StatusView {
             } catch (e01) {
             }
             this.applyBundleHome(b);
+            // ★ 兜底：home 段没带 summary（后端降级/字段缺失/部分返回）时会静默跳过，
+            //   导致卡片区一直转圈且不触发任何回退 —— 此时立刻补走四路老接口
+            if (this.summary === null) {
+              try {
+                DeviceStore.logCrash(getContext(this).filesDir, '[STEP] home 缺少 summary，回退四路老接口');
+              } catch (eS) {
+              }
+              this.fallbackLoad();
+            }
             // 首页数据先落缓存（此时只有 home 段）
             try {
               DeviceStore.cachePut('bundle:all', JSON.stringify(b));
@@ -796,21 +805,33 @@ export struct StatusView {
 
   /** 把 home 段应用到界面 */
   private applyBundleHome(b: BundleResult): void {
-    if (b.trend !== undefined && b.trend !== null && b.trend.points !== undefined
-      && b.trend.points.length > 0) {
-      this.applyTrend(JSON.stringify(b.trend));
-    }
+    // ★ 关键顺序：summary 必须最先落（卡片区靠它渲染）。
+    //   之前 applyTrend 在它前面，趋势一抛异常整段跳过 → summary 永远 null → 卡片不出现。
     if (b.summary !== undefined && b.summary !== null) {
       this.summary = b.summary;
       this.err = '';
       this.staleNote = '';
     }
-    if (b.hrv !== undefined && b.hrv !== null) {
-      this.hrv = b.hrv;
-      this.hrvErr = '';
+    // 以下每一项独立 try —— 任何一段失败都不能连累其它段
+    try {
+      if (b.trend !== undefined && b.trend !== null && b.trend.points !== undefined
+        && b.trend.points.length > 0) {
+        this.applyTrend(JSON.stringify(b.trend));
+      }
+    } catch (eT) {
     }
-    if (b.bodyBattery !== undefined && b.bodyBattery !== null) {
-      this.bb = b.bodyBattery;
+    try {
+      if (b.hrv !== undefined && b.hrv !== null) {
+        this.hrv = b.hrv;
+        this.hrvErr = '';
+      }
+    } catch (eH) {
+    }
+    try {
+      if (b.bodyBattery !== undefined && b.bodyBattery !== null) {
+        this.bb = b.bodyBattery;
+      }
+    } catch (eB) {
     }
     this.loading = false;
     this.refreshing = false;
