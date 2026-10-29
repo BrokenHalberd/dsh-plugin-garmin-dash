@@ -33,58 +33,11 @@ export class ApiClient {
   /** App 本地磁盘缓存目录（Index 启动时注入） */
   private static cacheDir: string = '';
 
-  /** 由页面在启动时注入 filesDir */
+  /** 预留：目前不使用 App 磁盘缓存（同步/异步文件 IO 都会拖慢首屏） */
   static setCacheDir(dir: string): void {
-    ApiClient.cacheDir = dir;
+    // 空实现，保留签名以免 Index 调用报错
   }
 
-  private static cacheFile(path: string): string {
-    let h = 5381;
-    for (let i = 0; i < path.length; i++) {
-      h = ((h * 33) + path.charCodeAt(i)) | 0;
-    }
-    const name = (h >>> 0).toString(16) + '_' + path.length;
-    return ApiClient.cacheDir + '/api-' + name + '.json';
-  }
-
-  /** 只对活动详情/轨迹做落盘缓存（体积可控、内容基本不变） */
-  private static isDiskCached(path: string): boolean {
-    return path.indexOf('/activity?') >= 0 || path.indexOf('/route?') >= 0;
-  }
-
-  private static diskRead(path: string, ttlMs: number): string {
-    try {
-      if (ApiClient.cacheDir.length === 0 || !ApiClient.isDiskCached(path)) {
-        return '';
-      }
-      const file = ApiClient.cacheFile(path);
-      if (!fileIo.accessSync(file)) {
-        return '';
-      }
-      const st = fileIo.statSync(file);
-      if (Date.now() - (st.mtime * 1000) > ttlMs) {
-        return '';
-      }
-      const buf = fileIo.readTextSync(file);
-      return buf.length > 2 ? buf : '';
-    } catch (e) {
-      return '';
-    }
-  }
-
-  private static diskWrite(path: string, text: string): void {
-    try {
-      if (ApiClient.cacheDir.length === 0 || !ApiClient.isDiskCached(path) || text.length < 3) {
-        return;
-      }
-      const fh = fileIo.openSync(ApiClient.cacheFile(path),
-        fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
-      fileIo.writeSync(fh.fd, text);
-      fileIo.closeSync(fh);
-    } catch (e) {
-      // 缓存失败不影响主流程
-    }
-  }
 
   private static getCache: Map<string, string> = new Map();
   private static getCacheAt: Map<string, number> = new Map();
@@ -270,10 +223,6 @@ export class ApiClient {
    * 与本地版（com.atlas.garminlocal）共用同一套 GarminApi / GarminLocalSource。
    */
   private static async authedGet(path: string): Promise<string> {
-    const diskHit = ApiClient.diskRead(path, 7 * 24 * 3600 * 1000);
-    if (diskHit.length > 0) {
-      return diskHit;
-    }
     const cachedText = ApiClient.getCache.get(path);
     if (cachedText !== undefined) {
       const at = ApiClient.getCacheAt.get(path);
@@ -288,7 +237,6 @@ export class ApiClient {
       if (local !== null) {
         ApiClient.getCache.set(path, local);
         ApiClient.getCacheAt.set(path, Date.now());
-        ApiClient.diskWrite(path, local);
         return local;
       }
       if (base.length === 0) {
@@ -313,7 +261,6 @@ export class ApiClient {
       }
       ApiClient.getCache.set(path, text);
       ApiClient.getCacheAt.set(path, Date.now());
-      ApiClient.diskWrite(path, text);
       return text;
     } catch (e) {
       // 后端不通（隧道抖动 / PC 离线 / 中继 503）→ 直连佳明

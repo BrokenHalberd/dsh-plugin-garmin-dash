@@ -107,19 +107,30 @@ export struct ActivitiesView {
   }
 
   private loadMore(): void {
-    if (this.loadingMore || !this.hasMore || !DeviceStore.isPaired()) {
+    if (this.loadingMore || !this.hasMore) {
       return;
     }
     this.loadingMore = true;
-    ApiClient.getActivities(PAGE_SIZE, this.items.length)
+    const offset = this.items.length;
+    ApiClient.getActivities(PAGE_SIZE, offset)
       .then((list: Activity[]) => {
-        this.items = this.items.concat(list);
+        // 必须构造新数组：原地 push 后赋回同一引用，ArkUI 判定未变化 → 不重绘
+        const merged: Activity[] = [];
+        for (const a of this.items) {
+          merged.push(a);
+        }
+        for (const b of list) {
+          merged.push(b);
+        }
+        this.items = merged;
         this.hasMore = list.length >= PAGE_SIZE;
-        this.loadingMore = false;
       })
-      .catch((e: Object) => {
+      .catch(() => {
+        this.hasMore = false;
+      })
+      .finally(() => {
+        // 无论成功失败都必须复位，否则列表一直显示"加载中"
         this.loadingMore = false;
-        this.err = ApiClient.friendly(e);
       });
   }
 
