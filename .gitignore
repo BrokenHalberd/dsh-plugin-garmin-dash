@@ -8,3 +8,9 @@ app/.idea/
 app/entry/.preview/
 *.hap.map
 .DS_Store
+
+# 运行状态与打包产物，不进版本库
+state/
+*.tgz
+test/account.local.json
+.diag-key
