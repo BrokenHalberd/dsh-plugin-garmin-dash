@@ -107,30 +107,19 @@ export struct ActivitiesView {
   }
 
   private loadMore(): void {
-    if (this.loadingMore || !this.hasMore) {
+    if (this.loadingMore || !this.hasMore || !DeviceStore.isPaired()) {
       return;
     }
     this.loadingMore = true;
-    const offset = this.items.length;
-    ApiClient.getActivities(PAGE_SIZE, offset)
+    ApiClient.getActivities(PAGE_SIZE, this.items.length)
       .then((list: Activity[]) => {
-        // 必须构造新数组：原地 push 后赋回同一引用，ArkUI 判定未变化 → 不重绘
-        const merged: Activity[] = [];
-        for (const a of this.items) {
-          merged.push(a);
-        }
-        for (const b of list) {
-          merged.push(b);
-        }
-        this.items = merged;
+        this.items = this.items.concat(list);
         this.hasMore = list.length >= PAGE_SIZE;
-      })
-      .catch(() => {
-        this.hasMore = false;
-      })
-      .finally(() => {
-        // 无论成功失败都必须复位，否则列表一直显示"加载中"
         this.loadingMore = false;
+      })
+      .catch((e: Object) => {
+        this.loadingMore = false;
+        this.err = ApiClient.friendly(e);
       });
   }
 
@@ -417,12 +406,6 @@ export struct ActivitiesView {
         .width('100%')
         .contentEndOffset(108)
         .scrollBar(BarState.Off)
-        .onReachEnd(() => {
-          // 滚动到底自动加载下一页（原来只能看最近一页）
-          if (!this.loading && this.hasMore) {
-            this.loadMore();
-          }
-        })
       }
       .width('100%')
       .height('100%')
