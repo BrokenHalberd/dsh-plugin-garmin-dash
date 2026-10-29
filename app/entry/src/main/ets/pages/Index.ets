@@ -7,6 +7,15 @@ import { ActivitiesView } from '../view/ActivitiesView';
 import { TrendView } from '../view/TrendView';
 import { MeView } from '../view/MeView';
 
+/** 底部栏一项的配置（按对象传参，@Builder 才会随状态刷新） */
+interface TabCfg {
+  title: string;
+  icon: Resource;
+  idx: number;
+  v: number;
+}
+
+
 /**
  * 主界面：液态玻璃选项栏 + 圆形 DSH 对话键。
  *
@@ -162,33 +171,33 @@ struct Index {
   }
 
   @Builder
-  tabItem(title: string, icon: Resource, idx: number) {
+  tabItem(cfg: TabCfg) {
     Flex({
       direction: FlexDirection.Column,
       justifyContent: FlexAlign.Center,
       alignItems: ItemAlign.Center,
       space: { main: LengthMetrics.vp(3) }
     }) {
-      SymbolGlyph(icon)
+      SymbolGlyph(cfg.icon)
         .fontSize(21)
-        .fontColor([this.currentTab === idx ? $r('app.color.accent') : $r('app.color.text_tertiary')])
+        .fontColor([this.currentTab === cfg.idx ? $r('app.color.accent') : $r('app.color.text_tertiary')])
         .renderingStrategy(SymbolRenderingStrategy.MULTIPLE_OPACITY)
-        .scale({ x: this.currentTab === idx ? 1.12 : 1, y: this.currentTab === idx ? 1.12 : 1 })
-        .translate({ y: this.currentTab === idx ? -1 : 0 })
+        .scale({ x: this.currentTab === cfg.idx ? 1.12 : 1, y: this.currentTab === cfg.idx ? 1.12 : 1 })
+        .translate({ y: this.currentTab === cfg.idx ? -1 : 0 })
         .animation({ duration: 320, curve: Curve.Friction })
 
-      Text(title)
+      Text(cfg.title)
         .fontSize(10)
-        .fontColor(this.currentTab === idx ? $r('app.color.accent') : $r('app.color.text_tertiary'))
-        .fontWeight(this.currentTab === idx ? FontWeight.Medium : FontWeight.Normal)
+        .fontColor(this.currentTab === cfg.idx ? $r('app.color.accent') : $r('app.color.text_tertiary'))
+        .fontWeight(this.currentTab === cfg.idx ? FontWeight.Medium : FontWeight.Normal)
     }
     .layoutWeight(1)
     .height(52)
     .margin({ left: 4, right: 4, top: 6, bottom: 6 })
     .borderRadius(100)
-    .backgroundColor(this.currentTab === idx ? $r('app.color.glass_fill_strong') : Color.Transparent)
+    .backgroundColor(this.currentTab === cfg.idx ? $r('app.color.glass_fill_strong') : Color.Transparent)
     .animation({ duration: 320, curve: Curve.Friction })
-    .onClick(() => { this.switchTo(idx); })
+    .onClick(() => { this.switchTo(cfg.idx); })
   }
 
   /** 圆形主按钮（ClashBox 启动键形态）→ DSH 对话触发键 */
@@ -290,10 +299,10 @@ struct Index {
 
       // 悬浮玻璃选项栏（全项目唯一一处真模糊，与 ClashBox 的 FloatBar 一致）
       Row() {
-        this.tabItem('状态', $r('sys.symbol.bolt_filled_on_circle'), 0)
-        this.tabItem('运动', $r('sys.symbol.compass_circle'), 1)
-        this.tabItem('趋势', $r('sys.symbol.rectangle_portrait_wave_2'), 2)
-        this.tabItem('我的', $r('sys.symbol.person_crop_circle_fill_1'), 3)
+        this.tabItem({ title: '状态', icon: $r('sys.symbol.bolt_filled_on_circle'), idx: 0, v: this.currentTab })
+        this.tabItem({ title: '运动', icon: $r('sys.symbol.compass_circle'), idx: 1, v: this.currentTab })
+        this.tabItem({ title: '趋势', icon: $r('sys.symbol.rectangle_portrait_wave_2'), idx: 2, v: this.currentTab })
+        this.tabItem({ title: '我的', icon: $r('sys.symbol.person_crop_circle_fill_1'), idx: 3, v: this.currentTab })
       }
       .width('93%')
       .height(64)
