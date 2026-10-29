@@ -48,7 +48,7 @@ export default class EntryFormAbility extends FormExtensionAbility {
       const d = formBindingData.createFormBindingData({
         'tsb': c0.tsb, 'ctl': c0.ctl, 'atl': c0.atl, 'ride': c0.ride,
         'updated': c0.updated,
-        'weekTss': c0.weekTss, 'steps': c0.steps, 'rhr': c0.rhr, 'bb': c0.bb,
+        'weekTss': c0.weekTss, 'steps': c0.steps, 'rhr': c0.rhr, 'bb': c0.bb, 'bbChg': c0.bbChg,
         'sleepDeep': c0.sleepDeep, 'sleepLight': c0.sleepLight,
         'sleepRem': c0.sleepRem, 'sleepAwake': c0.sleepAwake,
         'hrvNow': c0.hrvNow, 'hrvLow': c0.hrvLow, 'hrvB1': c0.hrvB1, 'hrvB2': c0.hrvB2,
@@ -119,11 +119,44 @@ export default class EntryFormAbility extends FormExtensionAbility {
         wt = wt + (one === null ? 0 : one);
       }
       const old = DeviceStore.getCardCache(filesDir);
+      // 缓存里没有充放数据时，卡片进程自己向后退一次（保证大卡片也能显示 +74/-50）
+      let bbChg: string | null = old.bbChg.length === 0 ? null : old.bbChg;
+      if (bbChg === null) {
+        try {
+          const bres = await http.createHttp().request(
+            net.base + '/garmin-dash/api/body-battery',
+            {
+              method: http.RequestMethod.GET,
+              usingProtocol: http.HttpProtocol.HTTP1_1,
+              header: { 'X-Device-Key': net.key } as Record<string, string>,
+              connectTimeout: 8000,
+              readTimeout: 15000,
+              expectDataType: http.HttpDataType.STRING
+            },
+          );
+          const btext = bres.result as string;
+          if (bres.responseCode === 200 && btext.length > 0) {
+            const bj = JSON.parse(btext) as BodyBatteryResp;
+            const ch = bj.charged;
+            const dr = bj.drained;
+            const hasCh = ch !== null && ch !== undefined;
+            const hasDr = dr !== null && dr !== undefined;
+            if (hasCh || hasDr) {
+              const plus = hasCh ? ('+' + ch) : '';
+              const minus = hasDr ? ('-' + dr) : '';
+              bbChg = plus + (plus.length > 0 && minus.length > 0 ? ' / ' : '') + minus;
+            }
+          }
+        } catch (e) {
+          bbChg = null;
+        }
+      }
       const extra: CardExtra = {
         weekTss: wt,
         steps: old.steps.length === 0 ? null : Number(old.steps),
         rhr: old.rhr.length === 0 ? null : Number(old.rhr),
         bb: old.bb.length === 0 ? null : Number(old.bb),
+        bbChg: bbChg,
         sleepDeep: old.sleepDeep.length === 0 ? null : Number(old.sleepDeep),
         sleepLight: old.sleepLight.length === 0 ? null : Number(old.sleepLight),
         sleepRem: old.sleepRem.length === 0 ? null : Number(old.sleepRem),
@@ -163,6 +196,7 @@ export default class EntryFormAbility extends FormExtensionAbility {
       'steps': c.steps,
       'rhr': c.rhr,
       'bb': c.bb,
+      'bbChg': c.bbChg,
       'sleepDeep': c.sleepDeep,
       'sleepLight': c.sleepLight,
       'sleepRem': c.sleepRem,
@@ -182,6 +216,11 @@ interface TrendPointResp {
   atl: number | null;
   tss: number | null;
   date: string;
+}
+
+interface BodyBatteryResp {
+  charged?: number | null;
+  drained?: number | null;
 }
 
 interface TrendResp {

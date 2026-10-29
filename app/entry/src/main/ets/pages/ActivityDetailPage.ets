@@ -86,6 +86,8 @@ struct ActivityDetailPage {
   private elevCtx: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.elevSettings);
   private hrSettings: RenderingContextSettings = new RenderingContextSettings(true);
   private hrCtx: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.hrSettings);
+  private powerSettings: RenderingContextSettings = new RenderingContextSettings(true);
+  private powerCtx: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.powerSettings);
   private settings: RenderingContextSettings = new RenderingContextSettings(true);
   private ctx: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.settings);
   onPageHide(): void {
@@ -654,6 +656,7 @@ struct ActivityDetailPage {
         this.buildMapOptions();
         this.drawElev();
         this.drawHr();
+        this.drawPower();
       }
     } catch (e) {
       this.routeErr = '轨迹数据解析失败';
@@ -1034,6 +1037,28 @@ struct ActivityDetailPage {
     }
   }
 
+  /** 功率变化（W）：直接用轨迹点里的功率序列，NaN 自动断线 */
+  private drawPower(): void {
+    const r = this.route;
+    if (r === null || !r.available || r.points.length < 3) {
+      return;
+    }
+    const vals: number[] = [];
+    let any = false;
+    for (let i = 0; i < r.points.length; i++) {
+      const v = r.points[i].power;
+      const ok = v !== undefined && v !== null && v > 0;
+      if (ok) {
+        any = true;
+      }
+      vals.push(ok ? (v as number) : NaN);
+    }
+    if (!any) {
+      return;
+    }
+    this.drawSeries(this.powerCtx, vals, '#4C8DFF', 'W');
+  }
+
   private drawHr(): void {
     const r = this.route;
     if (r === null || !r.available || r.points.length < 3) {
@@ -1170,6 +1195,32 @@ struct ActivityDetailPage {
         }
       } else {
         Text('该活动没有海拔数据').fontSize(11).fontColor($r('app.color.text_hint')).width('100%').margin({ top: 8 })
+      }
+    }
+    .padding(14).width('100%').margin({ top: 8 })
+    .backgroundColor($r('app.color.card_background_blur'))
+    .border({ width: 1, color: $r('app.color.card_border_highlight') })
+    .borderRadius(14)
+  }
+
+  /** 功率变化（W） */
+  @Builder
+  powerCard() {
+    Column() {
+      Row() {
+        Text('功率变化').fontSize(13).fontWeight(FontWeight.Medium)
+        Blank()
+        Text('W').fontSize(10).fontColor($r('app.color.text_tertiary'))
+      }
+      .width('100%')
+      if (this.route !== null && this.route.available) {
+        Canvas(this.powerCtx)
+          .width('100%').height(140).margin({ top: 8 })
+          .onReady(() => { this.drawPower(); })
+          .backgroundColor($r('app.color.card_background_blur'))
+          .borderRadius(12)
+      } else {
+        Text('该活动没有功率数据').fontSize(11).fontColor($r('app.color.text_hint')).width('100%').margin({ top: 8 })
       }
     }
     .padding(14).width('100%').margin({ top: 8 })
@@ -1337,6 +1388,7 @@ struct ActivityDetailPage {
             this.elevCard()
 
             this.hrCard()
+          this.powerCard()
 
             if (this.hasCurve()) {
               Column() {

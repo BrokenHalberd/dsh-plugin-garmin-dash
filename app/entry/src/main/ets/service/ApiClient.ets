@@ -4,6 +4,7 @@
  */
 import { http } from '@kit.NetworkKit';
 import { DeviceStore } from './DeviceStore';
+import { GarminLocalSource, localDate } from './GarminLocalSource';
 import { Summary, Activity, ActivityDetail, Trend, PairResult, DshLink, ChatReply , HrvInfo , HrvRange , CurveData , ActivitiesWindow , BodyBattery , RouteData } from '../model/Types';
 
 export class ApiError extends Error {
@@ -27,6 +28,10 @@ interface PairBody {
 const TIMEOUT_MS: number = 20000;
 
 export class ApiClient {
+  /** GET 结果短期缓存：同一活动重复进入详情时秒开（TTL 120 秒） */
+  private static getCache: Map<string, string> = new Map();
+  private static getCacheAt: Map<string, number> = new Map();
+  private static readonly GET_TTL_MS: number = 120000;
   /** 免鉴权的连通性检查（用于配对前验证地址） */
   static async health(baseUrl: string): Promise<string> {
     const url = ApiClient.normalize(baseUrl) + '/garmin-dash/api/health';
@@ -181,13 +186,34 @@ export class ApiClient {
     return JSON.parse(txt) as RouteData;
   }
 
+  /**
+   * 带鉴权的 GET。
+   *
+   * garminLocalFallback：正式版的**备用取数通道**——
+   * 后端（公网中继/隧道）不通时，直接用手机内的 refresh_token 走佳明直连，
+   * 结果序列化成同样的 JSON，因此所有视图无需任何改动。
+   * 与本地版（com.atlas.garminlocal）共用同一套 GarminApi / GarminLocalSource。
+   */
   private static async authedGet(path: string): Promise<string> {
-    const base = DeviceStore.getBaseUrl();
-    if (base.length === 0) {
-      throw new ApiError(0, '尚未配置服务器地址');
+    const cachedText = ApiClient.getCache.get(path);
+    if (cachedText !== undefined) {
+      const at = ApiClient.getCacheAt.get(path);
+      if (at !== undefined && Date.now() - at < ApiClient.GET_TTL_MS) {
+        return cachedText;
+      }
     }
+    const base = DeviceStore.getBaseUrl();
     const key = DeviceStore.getDeviceKey();
-    if (key.length === 0) {
+    if (base.length === 0 || key.length === 0) {
+      const local = await ApiClient.tryLocal(path);
+      if (local !== null) {
+        ApiClient.getCache.set(path, local);
+        ApiClient.getCacheAt.set(path, Date.now());
+        return local;
+      }
+      if (base.length === 0) {
+        throw new ApiError(0, '尚未配置服务器地址');
+      }
       throw new ApiError(401, '尚未配对，请先在「我的」里配对');
     }
     const req = http.createHttp();
@@ -205,9 +231,105 @@ export class ApiClient {
       if (res.responseCode !== 200) {
         throw new ApiError(res.responseCode, ApiClient.hint(res.responseCode, text));
       }
+      ApiClient.getCache.set(path, text);
+      ApiClient.getCacheAt.set(path, Date.now());
       return text;
+    } catch (e) {
+      // 后端不通（隧道抖动 / PC 离线 / 中继 503）→ 直连佳明
+      const local = await ApiClient.tryLocal(path);
+      if (local !== null) {
+        ApiClient.getCache.set(path, local);
+        ApiClient.getCacheAt.set(path, Date.now());
+        return local;
+      }
+      throw e as Error;
     } finally {
       req.destroy();
+    }
+  }
+
+  /** 从查询串取参数 */
+  private static queryValue(path: string, key: string): string {
+    const q: number = path.indexOf('?');
+    if (q < 0) {
+      return '';
+    }
+    const parts: string[] = path.substring(q + 1).split('&');
+    for (const part of parts) {
+      const eq: number = part.indexOf('=');
+      if (eq > 0 && part.substring(0, eq) === key) {
+        return decodeURIComponent(part.substring(eq + 1));
+      }
+    }
+    return '';
+  }
+
+  /**
+   * 后端路径 → 直连佳明（备用取数通道）。返回 JSON 文本；无对应实现返回 null。
+   * 内部异常一律吞掉返回 null，让调用方给出最终错误文案。
+   */
+  private static async tryLocal(path: string): Promise<string | null> {
+    try {
+      const prefix: string = '/garmin-dash/api/';
+      if (!path.startsWith(prefix)) {
+        return null;
+      }
+      const rest: string = path.substring(prefix.length);
+      const name: string = rest.split('?')[0];
+      if (name === 'summary') {
+        const date: string = ApiClient.queryValue(path, 'date');
+        const d: string = date.length > 0 ? date : localDate(new Date());
+        return JSON.stringify(await GarminLocalSource.summary(d));
+      }
+      if (name === 'activities') {
+        const days: string = ApiClient.queryValue(path, 'days');
+        if (days.length > 0) {
+          return JSON.stringify(await GarminLocalSource.activitiesDays(Number(days)));
+        }
+        const limit: number = Number(ApiClient.queryValue(path, 'limit'));
+        const offset: number = Number(ApiClient.queryValue(path, 'offset'));
+        return JSON.stringify(await GarminLocalSource.activities(
+          limit > 0 ? limit : 20, offset > 0 ? offset : 0));
+      }
+      if (name === 'activity') {
+        const id: number = Number(ApiClient.queryValue(path, 'id'));
+        if (id <= 0) {
+          return null;
+        }
+        const detail = await GarminLocalSource.activityDetail(id);
+        const merged = JSON.parse(JSON.stringify(detail)) as Record<string, Object>;
+        const curve = await GarminLocalSource.powerCurveRaw(id);
+        const ck: string[] = Object.keys(curve);
+        for (const k of ck) {
+          merged[k] = curve[k];
+        }
+        return JSON.stringify(merged);
+      }
+      if (name === 'trend') {
+        const days: number = Number(ApiClient.queryValue(path, 'days'));
+        return JSON.stringify(await GarminLocalSource.trend(days > 0 ? days : 30));
+      }
+      if (name === 'curve') {
+        const days: number = Number(ApiClient.queryValue(path, 'days'));
+        return JSON.stringify(await GarminLocalSource.curve(days > 0 ? days : 90));
+      }
+      if (name === 'hrv') {
+        const date: string = ApiClient.queryValue(path, 'date');
+        const d: string = date.length > 0 ? date : localDate(new Date());
+        return JSON.stringify(await GarminLocalSource.hrv(d));
+      }
+      if (name === 'hrv-range') {
+        const days: number = Number(ApiClient.queryValue(path, 'days'));
+        return JSON.stringify(await GarminLocalSource.hrvRange(days > 0 ? days : 14));
+      }
+      if (name === 'body-battery') {
+        const date: string = ApiClient.queryValue(path, 'date');
+        const d: string = date.length > 0 ? date : localDate(new Date());
+        return JSON.stringify(await GarminLocalSource.bodyBattery(d));
+      }
+      return null;
+    } catch (e) {
+      return null;
     }
   }
 

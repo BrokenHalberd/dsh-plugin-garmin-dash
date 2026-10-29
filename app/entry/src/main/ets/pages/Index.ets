@@ -234,9 +234,19 @@ struct Index {
             tick: this.tick,
             onSwipeOut: (delta: number) => {
               const t = this.currentTab + delta;
-              if (t >= 0 && t <= 3) {
-                this.switchTo(t);
+              if (t < 0 || t > 3) {
+                return;
               }
+              // 关键顺序：先改 currentTab，让 disableSwipe(this.currentTab === 2) 立刻解除禁用，
+              // 下一帧再 changeIndex(t, true) 才能真正带上翻页动画（禁用状态下是瞬跳）
+              this.currentTab = t;
+              this.tick = this.tick + 1;
+              setTimeout(() => {
+                try {
+                  this.controller.changeIndex(t, true);
+                } catch (eC) {
+                }
+              }, 0);
             }
           })
         }

@@ -223,6 +223,8 @@ export struct TrendView {
   private ctx: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.settings);
   /** chip 行滚动控制器：切面板时把激活 chip 滚进视野 */
   private chipScroller: Scroller = new Scroller();
+  /** 面板切换的淡入淡出（避免瞬切显得生硬） */
+  @State panelAlpha: number = 1;
   private curveSettings: RenderingContextSettings = new RenderingContextSettings(true);
   private curveCtx: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.curveSettings);
   private refSettings: RenderingContextSettings = new RenderingContextSettings(true);
@@ -883,11 +885,18 @@ export struct TrendView {
       this.onSwipeOut(delta);
       return;
     }
+    // 同选项栏节奏：先淡出，换面板并让标签居中，再淡入
+    this.getUIContext().animateTo({ duration: 80, curve: Curve.EaseOut }, () => {
+      this.panelAlpha = 0.25;
+    });
     this.panel = PANELS[next].key;
     try {
-      this.chipScroller.scrollToIndex(next);
+      this.chipScroller.scrollToIndex(next, true, ScrollAlign.CENTER);
     } catch (eC) {
     }
+    this.getUIContext().animateTo({ duration: 170, curve: Curve.EaseOut }, () => {
+      this.panelAlpha = 1;
+    });
   }
 
   // ── @Builder ──
@@ -1230,6 +1239,59 @@ export struct TrendView {
     return Math.round(sum / wsum);
   }
 
+  /** 该时长列在 Coggan 表中的列号（0=5s, 1=1min, 2=5min, 3=20min, 4=FTP） */
+  private colOfDur(i: number): number {
+    if (i <= 0) {
+      return 0;
+    }
+    if (i === 1) {
+      return 1;
+    }
+    if (i === 2) {
+      return 2;
+    }
+    if (i === 3) {
+      return 3;
+    }
+    return 4;
+  }
+
+  /**
+   * 指定口径下的综合等级（period：0=42 天，1=90 天，2=全时）。
+   *
+   * 为什么要单独一个函数：分档表的单元格高亮用的是 90 天口径（myLevelIdx），
+   * 而旧代码里"综合等级"大字与行名高亮用的是 compositeLevel（**全时**口径），
+   * 于是出现"等级已变 cat4、高亮仍在 cat5"的错位。这里把三处统一到同一口径，
+   * 且判定方式与表格自己的列值（wkgP(period, col)）逐列对齐。
+   */
+  private compositeLevelAt(period: number): number {
+    const table = this.tableOf();
+    let sum = 0;
+    let wsum = 0;
+    for (let i = 0; i < 6; i++) {
+      const wkg = this.wkgP(period, i);
+      if (wkg <= 0) {
+        continue;
+      }
+      const col = this.colOfDur(i);
+      let lv = -1;
+      for (let k = 0; k < table.names.length; k++) {
+        if (wkg >= this.refAt(k, col)) {
+          lv = k;
+          break;
+        }
+      }
+      if (lv < 0) {
+        // 低于最低已定义档 → 该列不参与综合（避免把 Noob 当成兜底档）
+        continue;
+      }
+      const wt = i === 5 ? EFTP_WEIGHT : DUR_WEIGHTS_W[i];
+      sum += lv * wt;
+      wsum += wt;
+    }
+    return wsum === 0 ? -1 : Math.round(sum / wsum);
+  }
+
   private levelName(lv: number): string {
     const table = this.tableOf();
     if (lv < 0 || lv >= table.names.length) {
@@ -1512,8 +1574,8 @@ export struct TrendView {
     Column() {
       Row() {
         Column() {
-          Text('综合等级').fontSize(10).fontColor(COLOR_TERTIARY)
-          Text(this.levelName(this.compositeLevel())).fontSize(22).fontWeight(FontWeight.Bold)
+          Text('90 天综合等级').fontSize(10).fontColor(COLOR_TERTIARY)
+          Text(this.levelName(this.compositeLevelAt(1))).fontSize(22).fontWeight(FontWeight.Bold)
             .fontColor(COLOR_ACCENT)
         }
         .alignItems(HorizontalAlign.Start).layoutWeight(1)
@@ -1580,7 +1642,7 @@ export struct TrendView {
     Row({ space: 10 }) {
       Column() {
         Text('功率强项（等级）').fontSize(10).fontColor(COLOR_TERTIARY)
-        Text(this.levelName(this.compositeLevel())).fontSize(24).fontWeight(FontWeight.Bold).fontColor(COLOR_ACCENT)
+        Text(this.levelName(this.compositeLevelAt(1))).fontSize(24).fontWeight(FontWeight.Bold).fontColor(COLOR_ACCENT)
         Text('等级表：' + this.tableSource()).fontSize(9).fontColor(COLOR_HINT).margin({ top: 4 })
       }
       .alignItems(HorizontalAlign.Start).layoutWeight(1).padding(14)
@@ -1659,7 +1721,7 @@ export struct TrendView {
       ForEach(this.tableOf().names, (nm: string, k: number) => {
         Row() {
           Text(nm).fontSize(11).width(52)
-            .fontColor(this.compositeLevel() === k ? COLOR_ACCENT : COLOR_SECONDARY)
+            .fontColor(this.compositeLevelAt(1) === k ? COLOR_ACCENT : COLOR_SECONDARY)
           ForEach(DUR_NAMES_W, (colNm: string, c: number) => {
             Text(this.refAt(k, c) > 0 ? '' + this.refAt(k, c) : '--')
               .fontSize(11).layoutWeight(1).textAlign(TextAlign.End)
@@ -2701,6 +2763,7 @@ export struct TrendView {
         )
         .padding({ left: 12, right: 12, bottom: 108 })
         .alignItems(HorizontalAlign.Start)
+        .opacity(this.panelAlpha)
       }
       .scrollBar(BarState.Off)
       .width('100%')

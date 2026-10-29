@@ -21,6 +21,7 @@ export class CardSync {
       'steps': c.steps,
       'rhr': c.rhr,
       'bb': c.bb,
+      'bbChg': c.bbChg,
       'sleepDeep': c.sleepDeep,
       'sleepLight': c.sleepLight,
       'sleepRem': c.sleepRem,

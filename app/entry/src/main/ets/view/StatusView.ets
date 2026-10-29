@@ -351,7 +351,34 @@ export struct StatusView {
   /** 载入今日 HRV（1 小时缓存） */
   /** 载入当日身体电量（后端直连端点，缓存 1 小时） */
   /** 身体电量副标题：显示当日最低值 */
+  /** 卡片用：电量充放字符串（+74/-50）；无数据显示空串 */
+  private bbChgPlain(): string {
+    const b0 = this.bb;
+    if (b0 === null || b0 === undefined) {
+      return '';
+    }
+    const ch = b0.charged;
+    const dr = b0.drained;
+    if ((ch === null || ch === undefined) && (dr === null || dr === undefined)) {
+      return '';
+    }
+    const plus = (ch === null || ch === undefined) ? '' : ('+' + ch);
+    const minus = (dr === null || dr === undefined) ? '' : ('-' + dr);
+    return plus + (plus.length > 0 && minus.length > 0 ? ' / ' : '') + minus;
+  }
+
   private bbSubText(): string {
+    // 电量变化（Garmin 风格）：+74 / -50
+    const b0 = this.bb;
+    if (b0 !== null && b0 !== undefined) {
+      const ch = b0.charged;
+      const dr = b0.drained;
+      if (ch !== undefined && dr !== undefined && (ch !== null || dr !== null)) {
+        const plus = ch === null || ch === undefined ? '--' : ('+' + ch);
+        const minus = dr === null || dr === undefined ? '--' : ('-' + dr);
+        return plus + ' / ' + minus;
+      }
+    }
     const bb = this.bb;
     if (bb !== null && bb.available && bb.low !== null) {
       return '当日最低 ' + bb.low;
@@ -939,6 +966,7 @@ export struct StatusView {
     }
     const extra: CardExtra = {
       weekTss: this.nz(wt),
+      bbChg: this.bbChgPlain(),
       steps: (s === undefined || s === null) ? null : this.nz(s.steps),
       calories: (s === undefined || s === null) ? null : this.nz(s.calories),
       stress: (s === undefined || s === null) ? null : this.nz(s.stress),

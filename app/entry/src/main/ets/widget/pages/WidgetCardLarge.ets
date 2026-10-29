@@ -12,6 +12,7 @@ struct WidgetCardLarge {
   @LocalStorageProp('steps') steps: string = '';
   @LocalStorageProp('rhr') rhr: string = '';
   @LocalStorageProp('bb') bb: string = '';
+  @LocalStorageProp('bbChg') bbChg: string = '';
   @LocalStorageProp('calories') calories: string = '';
   @LocalStorageProp('stress') stress: string = '';
   @LocalStorageProp('sleepDeep') sleepDeep: string = '';
@@ -212,7 +213,15 @@ struct WidgetCardLarge {
   metricBb() {
     Column() {
       Text('电量').fontSize(9).fontColor($r('app.color.text_tertiary'))
-      Text(this.st(this.bb)).fontSize(16).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
+      Row() {
+        Text(this.st(this.bb)).fontSize(14).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
+        if (this.bbChg.length > 0) {
+          // 加减跟在数字右侧，不额外占一行（否则会和步数/静息心率的标题错位）
+          Text(' ' + this.bbChg).fontSize(9).fontColor($r('app.color.text_tertiary'))
+            .margin({ left: 4 }).maxLines(1)
+        }
+      }
+      .alignItems(VerticalAlign.Bottom)
     }
     .alignItems(HorizontalAlign.Start).layoutWeight(1)
   }
@@ -255,13 +264,13 @@ struct WidgetCardLarge {
         Row() {
           this.metricSteps()
           this.metricRhr()
-          this.metricBb()
+          this.metricStress()
         }
         .width('100%')
 
         Row() {
           this.metricCal()
-          this.metricStress()
+          this.metricBb()
         }
         .width('100%').margin({ top: 4 })
 

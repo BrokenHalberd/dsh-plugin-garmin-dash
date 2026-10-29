@@ -173,6 +173,11 @@ export interface BodyBattery {
   high: number | null;
   low: number | null;
   reason: string | null;
+  /** 当日充入（+）/ 消耗（-）总量，Garmin 的 "+74 / -50" */
+  charged?: number | null;
+  drained?: number | null;
+  atWake?: number | null;
+  current?: number | null;
 }
 
 /** 轨迹点（抽稀后） */

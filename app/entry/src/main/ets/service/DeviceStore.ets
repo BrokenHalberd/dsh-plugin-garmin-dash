@@ -31,6 +31,8 @@ export interface CardExtra {
   steps: number | null;
   rhr: number | null;
   bb: number | null;
+  /** 电量充放，形如 "+74/-50"（卡片用字符串直传） */
+  bbChg: string | null;
   sleepDeep: number | null;
   sleepLight: number | null;
   sleepRem: number | null;
@@ -54,6 +56,7 @@ export interface CardCache {
   steps: string;
   rhr: string;
   bb: string;
+  bbChg: string;
   sleepDeep: string;
   sleepLight: string;
   sleepRem: string;
@@ -189,6 +192,7 @@ export class DeviceStore {
       steps: safeRound(x.steps, 0),
       rhr: safeRound(x.rhr, 0),
       bb: safeRound(x.bb, 0),
+    bbChg: x.bbChg === null || x.bbChg === undefined ? '' : String(x.bbChg),
       sleepDeep: safeRound(x.sleepDeep, 0),
       sleepLight: safeRound(x.sleepLight, 0),
       sleepRem: safeRound(x.sleepRem, 0),
@@ -217,7 +221,7 @@ export class DeviceStore {
   static getCardCache(filesDir: string): CardCache {
     const fallback: CardCache = {
       tsb: '', ctl: '', atl: '', ride: '打开 App 同步数据', updated: '', weekTss: '',
-      steps: '', rhr: '', bb: '', sleepDeep: '', sleepLight: '', sleepRem: '', sleepAwake: '',
+      steps: '', rhr: '', bb: '', bbChg: '', sleepDeep: '', sleepLight: '', sleepRem: '', sleepAwake: '',
       hrvNow: '', hrvLow: '', hrvB1: '', hrvB2: '', calories: '', stress: ''
     };
     try {
@@ -245,6 +249,68 @@ export class DeviceStore {
     } catch (e) {
       return fallback;
     }
+  }
+
+
+  // ── 直连续期所需凭据（配对时由后端一次性下发）────────────────────
+  /** refresh_token：能自行换新 access_token，是“脱离电脑运行”的关键 */
+  static setGarminRefreshToken(t: string): void {
+    const s = DeviceStore.ensure();
+    s.putSync('garminRefresh', t);
+    s.flush();
+  }
+
+
+  static getGarminRefreshToken(): string {
+    return DeviceStore.ensure().getSync('garminRefresh', '') as string;
+  }
+
+
+  /** access_token 到期时间（毫秒时间戳，0 表示未知） */
+  static setGarminTokenExp(ms: number): void {
+    const s = DeviceStore.ensure();
+    s.putSync('garminTokenExp', ms);
+    s.flush();
+  }
+
+
+  static getGarminTokenExp(): number {
+    return DeviceStore.ensure().getSync('garminTokenExp', 0) as number;
+  }
+
+
+  /** refresh_token 到期时间（毫秒时间戳） */
+  static setGarminRefreshExp(ms: number): void {
+    const s = DeviceStore.ensure();
+    s.putSync('garminRefreshExp', ms);
+    s.flush();
+  }
+
+
+  static getGarminRefreshExp(): number {
+    return DeviceStore.ensure().getSync('garminRefreshExp', 0) as number;
+  }
+
+
+  static clearGarminToken(): void {
+    const s = DeviceStore.ensure();
+    s.putSync('garminToken', '');
+    s.putSync('garminRefresh', '');
+    s.putSync('garminTokenExp', 0);
+    s.putSync('garminRefreshExp', 0);
+    s.flush();
+  }
+
+
+  
+  /** 佳明直连 access_token */
+  static setGarminToken(t: string): void {
+    DeviceStore.ensure().putSync('garminToken', t);
+  }
+
+
+  static getGarminToken(): string {
+    return DeviceStore.ensure().getSync('garminToken', '') as string;
   }
 
   static getBaseUrl(): string {
