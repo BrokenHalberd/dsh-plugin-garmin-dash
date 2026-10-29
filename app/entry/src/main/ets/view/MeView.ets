@@ -1,8 +1,10 @@
 import { promptAction } from '@kit.ArkUI';
+import { pasteboard } from '@kit.BasicServicesKit';
 import { common } from '@kit.AbilityKit';
 import { scanBarcode, scanCore } from '@kit.ScanKit';
 import { ApiClient, ApiError } from '../service/ApiClient';
 import { DeviceStore } from '../service/DeviceStore';
+import { LocalLlm } from '../service/LocalLlm';
 import { PairResult } from '../model/Types';
 /** 底部选项栏 + 安全区高度：滚到底时用来避开遮挡 */
 const BOTTOM_BAR_PAD: number = 104;
@@ -20,6 +22,14 @@ export struct MeView {
   @State deviceId: string = DeviceStore.getDeviceId();
   @State busy: boolean = false;
   @State msg: string = '';
+  /** 本地大模型配置（设备直连，不上传） */
+  @State llmUrl: string = DeviceStore.getLlmBaseUrl();
+  @State llmKey: string = DeviceStore.getLlmKey();
+  @State llmModel: string = DeviceStore.getLlmModel();
+  @State llmMsg: string = '';
+  @State llmBusy: boolean = false;
+  @State models: string[] = [];
+  @State exportText: string = '';
   @StorageLink('handFollow') handFollow: boolean = true;
   private toast(m: string): void {
     promptAction.showToast({ message: m, duration: 2500 });
@@ -249,6 +259,158 @@ export struct MeView {
     .margin({ top: 10 })
   }
 
+  /** 本地大模型（设备直连，不经过服务器）—— 从本地版移植 */
+  @Builder
+  llmCard() {
+    Column() {
+      Row() {
+        Text('本地大模型').fontSize(13).fontWeight(FontWeight.Medium)
+        Blank()
+        Text('设备直连 · 不上传').fontSize(10).fontColor($r('app.color.text_tertiary'))
+      }
+      .width('100%')
+      Text('接口地址（OpenAI 兼容）').fontSize(11).fontColor($r('app.color.text_secondary')).margin({ top: 8 })
+      TextInput({ text: this.llmUrl, placeholder: 'https://api.deepseek.com/v1' })
+        .type(InputType.URL).fontSize(12).height(38).margin({ top: 4 })
+        .onChange((v: string) => { this.llmUrl = v; })
+      Scroll() {
+        Row({ space: 8 }) {
+          ForEach(LocalLlm.PRESETS, (u: string) => {
+            Text(u.replace('https://', '').replace('/v1', ''))
+              .fontSize(10).fontColor($r('app.color.accent'))
+              .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+              .backgroundColor($r('app.color.chip_background'))
+              .borderRadius(10)
+              .onClick(() => { this.llmUrl = u; })
+          }, (u: string) => u)
+        }
+      }
+      .scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
+      .width('100%').margin({ top: 6 })
+      Text('API Key').fontSize(11).fontColor($r('app.color.text_secondary')).margin({ top: 8 })
+      TextInput({ text: this.llmKey, placeholder: 'sk-...' })
+        .type(InputType.Password).fontSize(12).height(38).margin({ top: 4 })
+        .onChange((v: string) => { this.llmKey = v; })
+      Text('模型名').fontSize(11).fontColor($r('app.color.text_secondary')).margin({ top: 8 })
+      TextInput({ text: this.llmModel, placeholder: 'deepseek-chat' })
+        .fontSize(12).height(38).margin({ top: 4 })
+        .onChange((v: string) => { this.llmModel = v; })
+      if (this.models.length > 0) {
+        Text('可用模型（点选）').fontSize(11).fontColor($r('app.color.text_secondary')).margin({ top: 8 })
+        Flex({ wrap: FlexWrap.Wrap }) {
+          ForEach(this.models, (mm: string) => {
+            Text(mm)
+              .fontSize(10)
+              .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+              .margin({ right: 6, top: 4 })
+              .borderRadius(10)
+              .backgroundColor(mm === this.llmModel ? $r('app.color.accent') : $r('app.color.chip_background'))
+              .fontColor(mm === this.llmModel ? $r('app.color.accent_on') : $r('app.color.text_secondary'))
+              .onClick(() => { this.llmModel = mm; })
+          }, (mm: string) => mm)
+        }
+        .width('100%')
+        .margin({ top: 2 })
+      }
+      Row({ space: 10 }) {
+        Button(this.llmBusy ? '测试中…' : '测试连接')
+          .fontSize(12).height(32).layoutWeight(1)
+          .backgroundColor($r('app.color.chip_background'))
+          .fontColor($r('app.color.text_primary'))
+          .enabled(!this.llmBusy)
+          .onClick(() => {
+            this.llmBusy = true;
+            this.llmMsg = '';
+            LocalLlm.listModels({ baseUrl: this.llmUrl, apiKey: this.llmKey, model: this.llmModel })
+              .then((list: string[]) => {
+                this.llmBusy = false;
+                if (list.length === 0) {
+                  this.llmMsg = '连接成功，但接口未返回模型列表，请手动填写模型名';
+                  return;
+                }
+                this.models = list;
+                let hit = false;
+                for (let i = 0; i < list.length; i++) {
+                  if (list[i] === this.llmModel) {
+                    hit = true;
+                  }
+                }
+                if (!hit) {
+                  this.llmModel = list[0];
+                }
+                this.llmMsg = '连接成功 ✓ 发现 ' + list.length + ' 个模型，点选下方即可';
+              })
+              .catch((e: Object) => {
+                this.llmBusy = false;
+                const err = e as Error;
+                this.llmMsg = '测试失败：' + (err.message === undefined ? String(e) : err.message);
+              });
+          })
+        Button('保存')
+          .fontSize(12).height(32).layoutWeight(1)
+          .backgroundColor($r('app.color.accent')).fontColor($r('app.color.accent_on'))
+          .onClick(() => {
+            LocalLlm.save({ baseUrl: this.llmUrl, apiKey: this.llmKey, model: this.llmModel });
+            this.llmMsg = '已保存到本机 ✓';
+            this.toast('本地大模型配置已保存');
+          })
+      }
+      .width('100%').margin({ top: 10 })
+      Row({ space: 10 }) {
+        Button('导出配置')
+          .fontSize(12).height(32).layoutWeight(1)
+          .backgroundColor($r('app.color.chip_background'))
+          .fontColor($r('app.color.text_primary'))
+          .onClick(() => {
+            this.exportText = LocalLlm.exportCode({ baseUrl: this.llmUrl, apiKey: this.llmKey, model: this.llmModel });
+            const data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, this.exportText);
+            pasteboard.getSystemPasteboard().setData(data).then(() => {
+              this.llmMsg = '已复制到剪贴板 ✓（串中含 Key，请勿发给他人）';
+            }).catch(() => {
+              this.llmMsg = '剪贴板不可用，请手动复制下方配置串';
+            });
+          })
+        Button('粘贴导入')
+          .fontSize(12).height(32).layoutWeight(1)
+          .backgroundColor($r('app.color.chip_background'))
+          .fontColor($r('app.color.text_primary'))
+          .onClick(() => {
+            pasteboard.getSystemPasteboard().getData().then((d: pasteboard.PasteData) => {
+              const txt: string = d.getPrimaryText();
+              const cfg = LocalLlm.importCode(txt);
+              this.llmUrl = cfg.baseUrl;
+              this.llmKey = cfg.apiKey;
+              this.llmModel = cfg.model;
+              LocalLlm.save(cfg);
+              this.llmMsg = '已从剪贴板导入并保存 ✓';
+            }).catch((e: Object) => {
+              const err = e as Error;
+              this.llmMsg = '导入失败：' + (err.message === undefined ? String(e) : err.message);
+            });
+          })
+      }
+      .width('100%').margin({ top: 8 })
+      if (this.exportText.length > 0) {
+        Text(this.exportText)
+          .fontSize(9).fontColor($r('app.color.text_secondary'))
+          .width('100%').padding(8).margin({ top: 6 })
+          .backgroundColor($r('app.color.chip_background'))
+          .borderRadius(8)
+          .wordBreak(WordBreak.BREAK_ALL)
+          .copyOption(CopyOptions.LocalDevice)
+      }
+      if (this.llmMsg.length > 0) {
+        Text(this.llmMsg).fontSize(11)
+          .fontColor(this.llmMsg.startsWith('已保存') || this.llmMsg.startsWith('连接成功') ? $r('app.color.accent') : $r('app.color.danger'))
+          .width('100%').margin({ top: 6 })
+      }
+    }
+    .padding(14).width('100%').margin({ top: 8 })
+    .backgroundColor($r('app.color.card_background_blur'))
+    .border({ width: 1, color: $r('app.color.card_border_highlight') })
+    .borderRadius(14)
+  }
+
   build() {
     Scroll() {
     Column() {
@@ -343,6 +505,7 @@ export struct MeView {
       Text('配对一次后长期有效：服务器域名固定，重启电脑也无需重新配对。')
         .fontSize(11).fontColor($r('app.color.text_hint')).width('100%').margin({ top: 12 })
       this.weightCard()
+      this.llmCard()
       this.levelTableCard()
     }
     .width('100%')

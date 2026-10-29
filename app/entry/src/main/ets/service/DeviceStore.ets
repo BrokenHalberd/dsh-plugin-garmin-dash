@@ -70,6 +70,9 @@ export interface CardCache {
 }
 
 const STORE_NAME: string = 'garmin_dash';
+const KEY_LLM_URL: string = 'llmUrl';
+const KEY_LLM_KEY: string = 'llmKey';
+const KEY_LLM_MODEL: string = 'llmModel';
 const KEY_BASE_URL: string = 'baseUrl';
 const KEY_DEVICE_KEY: string = 'deviceKey';
 const KEY_DEVICE_ID: string = 'deviceId';
@@ -81,6 +84,32 @@ export class DeviceStore {
     if (DeviceStore.store === null) {
       DeviceStore.store = preferences.getPreferencesSync(context, { name: STORE_NAME });
     }
+  }
+
+  /** 本地大模型：接口地址（只在设备本地保存，不上传） */
+  static getLlmBaseUrl(): string {
+    return DeviceStore.ensure().getSync(KEY_LLM_URL, 'https://api.deepseek.com/v1') as string;
+  }
+
+  static setLlmBaseUrl(url: string): void {
+    DeviceStore.ensure().putSync(KEY_LLM_URL, url.trim());
+  }
+
+  /** 本地大模型：API Key（只在设备本地保存，不上传） */
+  static getLlmKey(): string {
+    return DeviceStore.ensure().getSync(KEY_LLM_KEY, '') as string;
+  }
+
+  static setLlmKey(key: string): void {
+    DeviceStore.ensure().putSync(KEY_LLM_KEY, key.trim());
+  }
+
+  static getLlmModel(): string {
+    return DeviceStore.ensure().getSync(KEY_LLM_MODEL, 'deepseek-chat') as string;
+  }
+
+  static setLlmModel(model: string): void {
+    DeviceStore.ensure().putSync(KEY_LLM_MODEL, model.trim());
   }
 
   private static ensure(): preferences.Preferences {
