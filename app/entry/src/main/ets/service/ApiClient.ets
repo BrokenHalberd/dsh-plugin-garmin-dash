@@ -33,11 +33,68 @@ export class ApiClient {
   /** App 本地磁盘缓存目录（Index 启动时注入） */
   private static cacheDir: string = '';
 
-  /** 预留：目前不使用 App 磁盘缓存（同步/异步文件 IO 都会拖慢首屏） */
+  /** 由页面在启动时注入 filesDir */
   static setCacheDir(dir: string): void {
-    // 空实现，保留签名以免 Index 调用报错
+    ApiClient.cacheDir = dir;
   }
 
+
+  private static cacheFile(path: string): string {
+    let h = 5381;
+    for (let i = 0; i < path.length; i++) {
+      h = ((h * 33) + path.charCodeAt(i)) | 0;
+    }
+    return ApiClient.cacheDir + '/api-' + (h >>> 0).toString(16) + '_' + path.length + '.json';
+  }
+
+  /** 只对活动详情/轨迹落盘（体积可控、内容基本不变） */
+  private static isDiskCached(path: string): boolean {
+    return path.indexOf('/activity?') >= 0 || path.indexOf('/route?') >= 0;
+  }
+
+  /**
+   * 后台写缓存：**不 await、不阻塞**调用方，失败静默。
+   * 用 promise 版 fileIo，避免同步 IO 阻塞 UI 线程（那是"底部栏不重绘"的根因）。
+   */
+  private static diskWriteLater(path: string, text: string): void {
+    try {
+      if (ApiClient.cacheDir.length === 0 || !ApiClient.isDiskCached(path) || text.length < 3) {
+        return;
+      }
+      const file = ApiClient.cacheFile(path);
+      fileIo.open(file, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC)
+        .then((fh: fileIo.File) => {
+          fileIo.write(fh.fd, text)
+            .then(() => {})
+            .catch(() => {})
+            .finally(() => { fileIo.close(fh).catch(() => {}); });
+        })
+        .catch(() => {});
+    } catch (e) {
+      // 缓存失败绝不影响主流程
+    }
+  }
+
+  /** 只在网络失败时调用：异步读盘兜底（不在正常路径上） */
+  private static async diskReadFallback(path: string, ttlMs: number): Promise<string> {
+    try {
+      if (ApiClient.cacheDir.length === 0 || !ApiClient.isDiskCached(path)) {
+        return '';
+      }
+      const file = ApiClient.cacheFile(path);
+      if (!fileIo.accessSync(file)) {
+        return '';
+      }
+      const st = fileIo.statSync(file);
+      if (Date.now() - (st.mtime * 1000) > ttlMs) {
+        return '';
+      }
+      const buf = await fileIo.readText(file);
+      return buf.length > 2 ? buf : '';
+    } catch (e) {
+      return '';
+    }
+  }
 
   private static getCache: Map<string, string> = new Map();
   private static getCacheAt: Map<string, number> = new Map();
@@ -237,6 +294,7 @@ export class ApiClient {
       if (local !== null) {
         ApiClient.getCache.set(path, local);
         ApiClient.getCacheAt.set(path, Date.now());
+        ApiClient.diskWriteLater(path, local);
         return local;
       }
       if (base.length === 0) {
@@ -261,6 +319,8 @@ export class ApiClient {
       }
       ApiClient.getCache.set(path, text);
       ApiClient.getCacheAt.set(path, Date.now());
+      // 后台落盘：不阻塞返回
+      ApiClient.diskWriteLater(path, text);
       return text;
     } catch (e) {
       // 后端不通（隧道抖动 / PC 离线 / 中继 503）→ 直连佳明
