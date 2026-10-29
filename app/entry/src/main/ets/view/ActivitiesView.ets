@@ -57,6 +57,9 @@ export struct ActivitiesView {
   private loadFirst(fromPull: boolean): void {
     if (!DeviceStore.isPaired()) {
       this.err = '尚未配对：请到「我的」里完成配对';
+      // 早退必须复位，否则下拉刷新会永远停在"刷新中"
+      this.loading = false;
+      this.refreshing = false;
       return;
     }
     const key = 'activities:0';
@@ -99,10 +102,14 @@ export struct ActivitiesView {
       })
       .catch((e: Object) => {
         this.loading = false;
-        this.refreshing = false;
         if (!showed) {
           this.err = ApiClient.friendly(e);
         }
+      })
+      .finally(() => {
+        // 任何结果都结束刷新态（含请求一直不返回后的重试失败）
+        this.refreshing = false;
+        this.loading = false;
       });
   }
 
