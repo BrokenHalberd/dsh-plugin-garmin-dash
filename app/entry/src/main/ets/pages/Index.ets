@@ -1,4 +1,5 @@
 import { common } from '@kit.AbilityKit';
+import { ApiClient } from '../service/ApiClient';
 import { router, LengthMetrics, curves, display } from '@kit.ArkUI';
 import { motion } from '@kit.MultimodalAwarenessKit';
 import { DeviceStore } from '../service/DeviceStore';
@@ -30,6 +31,14 @@ const BOTTOM_BAR_PAD: number = 104;
 @Component
 struct Index {
   private context = getContext(this) as common.UIAbilityContext;
+  // 详情/轨迹的 App 本地缓存目录（弱网或后端抖动时秒开）
+  private warmLocalCache(): void {
+    try {
+      ApiClient.setCacheDir(this.context.filesDir);
+    } catch (e) {
+      // 忽略
+    }
+  }
   private controller: SwiperController = new SwiperController();
   /** 右手时圆键需要向右平移的距离（vp） */
   private shiftX: number = 0;
@@ -50,6 +59,7 @@ struct Index {
   @State fabVisible: boolean = true;
 
   aboutToAppear(): void {
+    this.warmLocalCache();
     DeviceStore.init(this.context);
     try {
       const screenW = px2vp(display.getDefaultDisplaySync().width);

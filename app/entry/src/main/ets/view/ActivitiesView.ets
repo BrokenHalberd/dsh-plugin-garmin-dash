@@ -406,6 +406,12 @@ export struct ActivitiesView {
         .width('100%')
         .contentEndOffset(108)
         .scrollBar(BarState.Off)
+        .onReachEnd(() => {
+          // 滚动到底自动加载下一页（原来只能看最近一页）
+          if (!this.loading && this.hasMore) {
+            this.loadMore();
+          }
+        })
       }
       .width('100%')
       .height('100%')
