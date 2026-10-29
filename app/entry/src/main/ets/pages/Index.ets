@@ -265,7 +265,6 @@ struct Index {
         }
         .width('100%').height('100%')
       }
-      .index(this.currentTab)
       .loop(false)
       // 趋势页(索引2)交给内层面板先滑，到头由 onSwipeOut 回调切大页（对齐 ClashBox）
       .disableSwipe(this.currentTab === 2)
