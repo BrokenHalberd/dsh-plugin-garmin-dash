@@ -1,9 +1,10 @@
+# 依赖与构建产物（App 工程在 app/ 下）
 node_modules/
-*.tgz
-*.log
-state/
-build/
-.hvigor/
 oh_modules/
-.idea/
+app/entry/build/
+app/build/
+app/.hvigor/
+app/.idea/
+app/entry/.preview/
+*.hap.map
 .DS_Store
