@@ -30,7 +30,7 @@ const BOTTOM_BAR_PAD: number = 104;
 @Component
 struct Index {
   private context = getContext(this) as common.UIAbilityContext;
-  private controller: SwiperController = new SwiperController();
+  private controller: TabsController = new TabsController();
   /** 右手时圆键需要向右平移的距离（vp） */
   private shiftX: number = 0;
   /** 上一次已生效的握持手：0 未知 / 1 左手 / 2 右手 */
@@ -157,7 +157,7 @@ struct Index {
 
   private switchTo(idx: number): void {
     this.currentTab = idx;
-    this.controller.changeIndex(idx, true);
+    this.controller.changeIndex(idx);
     this.tick = this.tick + 1;
   }
 
@@ -217,19 +217,26 @@ struct Index {
 
   build() {
     Stack({ alignContent: Alignment.Bottom }) {
-      Swiper(this.controller) {
-        Column() {
-          StatusView({ tick: this.tick })
+      Tabs({ barPosition: BarPosition.End, controller: this.controller }) {
+        TabContent() {
+          Column() {
+            StatusView({ tick: this.tick })
+          }
+          .width('100%').height('100%')
         }
-        .width('100%').height('100%')
+        .tabBar(this.tabItem('状态', $r('sys.symbol.bolt_filled_on_circle'), 0))
 
-        Column() {
-          ActivitiesView({ tick: this.tick })
+        TabContent() {
+          Column() {
+            ActivitiesView({ tick: this.tick })
+          }
+          .width('100%').height('100%')
         }
-        .width('100%').height('100%')
+        .tabBar(this.tabItem('运动', $r('sys.symbol.compass_circle'), 1))
 
-        Column() {
-          TrendView({
+        TabContent() {
+          Column() {
+            TrendView({
             tick: this.tick,
             onSwipeOut: (delta: number) => {
               const t = this.currentTab + delta;
@@ -237,37 +244,33 @@ struct Index {
                 return;
               }
               // 关键顺序：先改 currentTab，让 disableSwipe(this.currentTab === 2) 立刻解除禁用，
-              // 下一帧再 changeIndex(t, true) 才能真正带上翻页动画（禁用状态下是瞬跳）
+              // 下一帧再 changeIndex(t) 才能真正带上翻页动画（禁用状态下是瞬跳）
               this.currentTab = t;
               this.tick = this.tick + 1;
               setTimeout(() => {
                 try {
-                  this.controller.changeIndex(t, true);
+                  this.controller.changeIndex(t);
                 } catch (eC) {
                 }
               }, 0);
             }
           })
+          }
+          .width('100%').height('100%')
         }
-        .width('100%').height('100%')
+        .tabBar(this.tabItem('趋势', $r('sys.symbol.rectangle_portrait_wave_2'), 2))
 
-        Column() {
-          MeView({ onChanged: () => { this.tick = this.tick + 1; } })
+        TabContent() {
+          Column() {
+            MeView({ onChanged: () => { this.tick = this.tick + 1; } })
+          }
+          .width('100%').height('100%')
         }
-        .width('100%').height('100%')
+        .tabBar(this.tabItem('我的', $r('sys.symbol.person_crop_circle_fill_1'), 3))
       }
-      .index(this.currentTab)
-      .loop(false)
       // 趋势页(索引2)交给内层面板先滑，到头由 onSwipeOut 回调切大页（对齐 ClashBox）
-      .disableSwipe(this.currentTab === 2)
+      .scrollable(this.currentTab !== 2)
       // 对齐 ClashBox ProxyPage：内层 Scroll 先处理纵向，Swiper 只接横向
-      .nestedScroll(SwiperNestedScrollMode.SELF_FIRST)
-      .cachedCount(0)
-      .indicator(false)
-      .duration(280)
-      .curve(Curve.Friction)
-      .effectMode(EdgeEffect.None)
-      .itemSpace(0)
       .onChange((index: number) => {
         this.currentTab = index;
         this.tick = this.tick + 1;
@@ -289,13 +292,7 @@ struct Index {
       .translate({ x: this.handLeft ? 0 : this.shiftX })
 
       // 悬浮玻璃选项栏（全项目唯一一处真模糊，与 ClashBox 的 FloatBar 一致）
-      Row() {
-        this.tabItem('状态', $r('sys.symbol.bolt_filled_on_circle'), 0)
-        this.tabItem('运动', $r('sys.symbol.compass_circle'), 1)
-        this.tabItem('趋势', $r('sys.symbol.rectangle_portrait_wave_2'), 2)
-        this.tabItem('我的', $r('sys.symbol.person_crop_circle_fill_1'), 3)
-      }
-      .width('93%')
+
       .height(64)
       .margin({ bottom: 12 + this.bottomInset })
       .backgroundBlurStyle(BlurStyle.Thin)
