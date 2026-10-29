@@ -157,7 +157,6 @@ struct Index {
 
   private switchTo(idx: number): void {
     this.currentTab = idx;
-    this.currentTab = idx;
     this.controller.changeIndex(idx, true);
     this.tick = this.tick + 1;
   }
