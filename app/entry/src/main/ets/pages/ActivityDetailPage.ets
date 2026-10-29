@@ -635,7 +635,7 @@ struct ActivityDetailPage {
       this.applyRoute(cached);
       return;
     }
-    ApiClient.getRoute(id, 600)
+    ApiClient.getRouteRetry(id, 600)
       .then((r: RouteData) => {
         this.applyRoute(JSON.stringify(r));
         if (r.available) {

@@ -181,6 +181,24 @@ export class ApiClient {
   }
 
   /** 路线（后端抽稀后一次返回，缓存 6 小时） */
+  /** 路线：失败自动重试（中继抖动时第二次基本都命中后端缓存） */
+  static async getRouteRetry(id: number, points: number): Promise<RouteData> {
+    let last: Error = new Error('路线加载失败');
+    for (let i = 0; i < 3; i++) {
+      try {
+        return await ApiClient.getRoute(id, points);
+      } catch (e) {
+        last = e as Error;
+        if (i < 2) {
+          await new Promise<void>((resolve: () => void) => {
+            setTimeout(() => { resolve(); }, 900);
+          });
+        }
+      }
+    }
+    throw last;
+  }
+
   static async getRoute(id: number, points: number): Promise<RouteData> {
     const txt = await ApiClient.authedGet('/garmin-dash/api/route?id=' + id + '&points=' + points);
     return JSON.parse(txt) as RouteData;
