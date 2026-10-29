@@ -269,6 +269,12 @@ struct Index {
         .tabBar(this.tabItem('我的', $r('sys.symbol.person_crop_circle_fill_1'), 3))
       }
       // 趋势页(索引2)交给内层面板先滑，到头由 onSwipeOut 回调切大页（对齐 ClashBox）
+      // 底部栏玻璃样式（Tabs 自带栏，替代原自绘悬浮栏）
+      .barBackgroundColor(Color.Transparent)
+      .barBackgroundBlurStyle(BlurStyle.Thin)
+      .barHeight(64)
+      .barMode(BarMode.Fixed)
+      .animationDuration(280)
       .scrollable(this.currentTab !== 2)
       // 对齐 ClashBox ProxyPage：内层 Scroll 先处理纵向，Swiper 只接横向
       .onChange((index: number) => {
