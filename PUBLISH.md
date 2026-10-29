@@ -15,6 +15,7 @@ dsh-plugin-garmin-dash/
 │  ├─ setup-page.mjs       部署引导页 HTML
 │  ├─ qr.mjs               二维码 PNG（按需解析宿主的 qrcode）
 │  ├─ garmin-service.mjs    数据聚合（summary/趋势/曲线/HRV/轨迹）
+│  ├─ GarminApi.ets / GarminLocalSource.ets   App 侧手机直连（备用取数通道，在 app/ 下）
 │  ├─ garmin-direct.mjs     ★ 佳明直连客户端（自建，不依赖 garmin-connect 插件）
 │  └─ …                   配对库、快照、趋势等
 ├─ bin/                    命令行工具（mint-pair-code）

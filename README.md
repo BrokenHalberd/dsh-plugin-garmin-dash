@@ -87,6 +87,55 @@ export DSH_APP_DIR=/path/to/DSH/resources/app/node_modules/@deepseek-ai
 
 ---
 
+## 数据通道（后端 / 手机本地直连）
+
+本插件同时提供**两条取数通道**，插件侧与 App 侧按同一顺序工作：
+
+| 顺序 | 通道 | 凭据 | 说明 |
+|---|---|---|---|
+| 1 | **后端通道**（默认） | 设备密钥 `deviceKey`（扫码配对产生） | App → 隧道/中继 → 本插件，插件负责会话与佳明取数 |
+| 2 | **手机本地直连**（备用） | 佳明 `refresh_token` 副本 | 后端不通（隧道抖动 / PC 离线 / 中继 503）时，App 直接用手机里的令牌访问佳明 |
+
+### 一次配对，两条通道
+
+配对只产生 `deviceKey`。手机拿到 `deviceKey` 后，向 `GET /garmin-dash/api/garmin-token` 取一份 `refresh_token` 副本（响应含 `access_token`、`refresh_token`、`client_id`、`token_url` 与过期时间）。
+
+因此**只扫一个码**，两条通道同时可用；之后手机自行续期，不再依赖后端。实测结论：佳明的 refresh_token 轮换是**宽松**的（旧值不会因为被替换而立即作废，多条链可并存），所以 PC 与手机各持一份副本互不影响。
+
+### 本地直连的实现与等价性
+
+| 端 | 文件 | 作用 |
+|---|---|---|
+| App | `app/entry/src/main/ets/service/GarminApi.ets` | 直连底座：Garmin 原生请求头、Basic 认证、续期（轮换即覆盖）、401 重试、并发上限 |
+| App | `app/entry/src/main/ets/service/GarminLocalSource.ets` | 把后端聚合语义搬到端上：summary / HRV（7 天回溯）/ 身体电量 / 功率曲线 / 活动与详情 / 趋势 EMA |
+| App | `app/entry/src/main/ets/service/ApiClient.ets` | **单点回落**：`authedGet()` 在后端失败时改走直连，并把结果序列化成同样的 JSON，**视图层零改动** |
+
+等价性靠脚本验证，不靠人工感觉：`scripts/verify-local-source.mjs`（另存于 `E:\DSH-Garmin\scripts\`）用同一套逻辑在 Node 里复刻一遍，与后端 `/api/*` 逐项对比 summary / HRV / 电量 / 曲线 / 趋势共 16 项，当前 **16/16 一致**。
+
+### 关键上游字段（避免二次踩坑）
+
+- 活动详情必须读 `summaryDTO`（顶层只有元信息）：距离 / 时长 / TSS / 心率 / 爬升都在里面
+- 功率字段名有两套：列表项 `avgPower` / `normPower`，`summaryDTO` 里是 `averagePower` / `normalizedPower`
+- 全程功率曲线来自 `/activity-service/activity/{id}/powerCurve`（`maxAvgPower_1..18000` 共 15 档）
+- 电量充放（Garmin 的 `+74 / -50`）：`bodyBatteryChargedValue` / `bodyBatteryDrainedValue`
+- VO2max 活动级常缺失：用当日 `/metrics-service/metrics/maxmet/daily/{d}/{d}` 的 `cycling.vo2MaxValue` 兜底
+- 左右平衡是 `leftBalance` / `rightBalance`，骑行踏频是 `averageBikeCadence`（不是 `avgLeftBalance` / `averageBikingCadenceInRevPerMinute`）
+
+### 如何核对「实际在用 = 对外发布」
+
+运行时通过 profile 的 `node_modules/dsh-plugin-garmin-dash` 软链指向工作副本；二者一致性用哈希核对：
+
+```bash
+for f in /path/to/runtime/lib/*.mjs; do
+  b=$(basename "$f")
+  a=$(sha256sum "$f" | cut -c1-12)
+  c=$(sha256sum "lib/$b" | cut -c1-12)
+  [ "$a" = "$c" ] && echo "OK  $b" || echo "DIFF $b"
+done
+```
+
+App 侧同理：本仓库 `app/` 是 App 工程源码的镜像，`assets/GarminDash-latest.hap` 指向当前构建。
+
 ## 安全设计
 
 - 配对码一次性、10 分钟有效；设备库只存密钥哈希
