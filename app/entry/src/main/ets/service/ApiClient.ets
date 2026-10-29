@@ -5,6 +5,7 @@
 import { http } from '@kit.NetworkKit';
 import { DeviceStore } from './DeviceStore';
 import { GarminLocalSource, localDate } from './GarminLocalSource';
+import { fileIo } from '@kit.CoreFileKit';
 import { Summary, Activity, ActivityDetail, Trend, PairResult, DshLink, ChatReply , HrvInfo , HrvRange , CurveData , ActivitiesWindow , BodyBattery , RouteData } from '../model/Types';
 
 export class ApiError extends Error {
@@ -215,7 +216,87 @@ export class ApiClient {
   /** 公网通道不可达标记：置位后在冷却期内直接走本地直连，避免每条请求白等 20 秒超时 */
   private static publicDown: boolean = false;
   private static publicDownAt: number = 0;
-  private static readonly PUBLIC_RETRY_MS: number = 120000;
+  private static readonly PUBLIC_RETRY_MS: number = 600000;
+
+  /** 公网不可达判定：会话内标记 或 持久化的截止时间（AppStorage 跨重启） */
+  private static directActive(now: number): boolean {
+    if (ApiClient.publicDown && now - ApiClient.publicDownAt < ApiClient.PUBLIC_RETRY_MS) {
+      return true;
+    }
+    const until = AppStorage.get<number>('garminDirectUntil') ?? 0;
+    return until > now;
+  }
+
+  private static markDirect(): void {
+    ApiClient.publicDown = true;
+    ApiClient.publicDownAt = Date.now();
+    AppStorage.setOrCreate<number>('garminDirectUntil', Date.now() + ApiClient.PUBLIC_RETRY_MS);
+  }
+
+  private static clearDirect(): void {
+    ApiClient.publicDown = false;
+    AppStorage.setOrCreate<number>('garminDirectUntil', 0);
+  }
+
+  /** 直连落盘缓存目录（Index 启动时注入 filesDir） */
+  private static cacheDir: string = '';
+
+  static setCacheDir(dir: string): void {
+    ApiClient.cacheDir = dir;
+  }
+
+  private static cacheFile(path: string): string {
+    let h = 5381;
+    for (let i = 0; i < path.length; i++) {
+      h = ((h * 33) + path.charCodeAt(i)) | 0;
+    }
+    return ApiClient.cacheDir + '/api-' + (h >>> 0).toString(16) + '_' + path.length + '.json';
+  }
+
+  /** 只缓存运动类数据（列表/详情/轨迹），与用户口径一致 */
+  private static isSportPath(path: string): boolean {
+    return path.indexOf('/garmin-dash/api/activity') >= 0
+      || path.indexOf('/garmin-dash/api/activities') >= 0
+      || path.indexOf('/garmin-dash/api/route') >= 0;
+  }
+
+  /** 后台写盘（fire-and-forget，纯异步，绝不阻塞 UI/请求返回） */
+  private static diskWriteLater(path: string, text: string): void {
+    try {
+      if (ApiClient.cacheDir.length === 0 || !ApiClient.isSportPath(path) || text.length < 3) {
+        return;
+      }
+      const file = ApiClient.cacheFile(path);
+      fileIo.open(file, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC)
+        .then((fh: fileIo.File) => {
+          fileIo.write(fh.fd, text)
+            .then(() => {})
+            .catch(() => {})
+            .finally(() => { fileIo.close(fh).catch(() => {}); });
+        })
+        .catch(() => {});
+    } catch (e) {
+      // 缓存失败绝不影响主流程
+    }
+  }
+
+  /** 直连模式下先读盘（TTL 7 天），命中即秒开 */
+  private static async diskRead(path: string): Promise<string> {
+    try {
+      if (ApiClient.cacheDir.length === 0 || !ApiClient.isSportPath(path)) {
+        return '';
+      }
+      const file = ApiClient.cacheFile(path);
+      const st = fileIo.statSync(file);
+      if (Date.now() - (st.mtime * 1000) > 7 * 24 * 3600 * 1000) {
+        return '';
+      }
+      const buf = await fileIo.readText(file);
+      return buf.length > 2 ? buf : '';
+    } catch (e) {
+      return '';
+    }
+  }
 
   private static async authedGet(path: string): Promise<string> {
     const cachedText = ApiClient.getCache.get(path);
@@ -240,15 +321,23 @@ export class ApiClient {
       throw new ApiError(401, '尚未配对，请先在「我的」里配对');
     }
     const nowMs = Date.now();
-    if (ApiClient.publicDown && nowMs - ApiClient.publicDownAt < ApiClient.PUBLIC_RETRY_MS) {
+    if (ApiClient.directActive(nowMs)) {
+      // 先读直连落盘缓存（运动数据秒开），再走本地直连
+      const diskFast = await ApiClient.diskRead(path);
+      if (diskFast !== '') {
+        ApiClient.getCache.set(path, diskFast);
+        ApiClient.getCacheAt.set(path, nowMs);
+        return diskFast;
+      }
       const localFast = await ApiClient.tryLocal(path);
       if (localFast !== null) {
         ApiClient.getCache.set(path, localFast);
         ApiClient.getCacheAt.set(path, nowMs);
+        ApiClient.diskWriteLater(path, localFast);
         return localFast;
       }
       // 本地源不覆盖该接口（如 route/dsh-link）→ 仍走网络
-      ApiClient.publicDown = false;
+      ApiClient.clearDirect();
     }
     const req = http.createHttp();
     try {
@@ -265,21 +354,22 @@ export class ApiClient {
       if (res.responseCode !== 200) {
         throw new ApiError(res.responseCode, ApiClient.hint(res.responseCode, text));
       }
-      ApiClient.publicDown = false;
+      ApiClient.clearDirect();
       ApiClient.getCache.set(path, text);
       ApiClient.getCacheAt.set(path, Date.now());
+      ApiClient.diskWriteLater(path, text);
       return text;
     } catch (e) {
       // 网络类失败（超时/拒绝/5xx/中继）→ 置粘滞标记；业务 4xx 说明后端可达，不置
       if (!(e instanceof ApiError) || (e as ApiError).code >= 500 || (e as ApiError).code === 0) {
-        ApiClient.publicDown = true;
-        ApiClient.publicDownAt = Date.now();
+        ApiClient.markDirect();
       }
       // 后端不通（隧道抖动 / PC 离线 / 中继 503）→ 直连佳明
       const local = await ApiClient.tryLocal(path);
       if (local !== null) {
         ApiClient.getCache.set(path, local);
         ApiClient.getCacheAt.set(path, Date.now());
+        ApiClient.diskWriteLater(path, local);
         return local;
       }
       throw e as Error;

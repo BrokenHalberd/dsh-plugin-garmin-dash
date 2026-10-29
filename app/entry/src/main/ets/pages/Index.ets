@@ -6,6 +6,7 @@ import { StatusView } from '../view/StatusView';
 import { ActivitiesView } from '../view/ActivitiesView';
 import { TrendView } from '../view/TrendView';
 import { MeView } from '../view/MeView';
+import { ApiClient } from '../service/ApiClient';
 import { FloatBar, TabDef } from '../view/FloatBar';
 
 /**
@@ -51,6 +52,7 @@ struct Index {
   @State fabVisible: boolean = true;
 
   aboutToAppear(): void {
+    ApiClient.setCacheDir(this.context.filesDir);
     DeviceStore.init(this.context);
     try {
       const screenW = px2vp(display.getDefaultDisplaySync().width);
