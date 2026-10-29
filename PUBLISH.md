@@ -14,7 +14,9 @@ dsh-plugin-garmin-dash/
 │  ├─ config.mjs           配置与路径解析（★ 可分享的关键）
 │  ├─ setup-page.mjs       部署引导页 HTML
 │  ├─ qr.mjs               二维码 PNG（按需解析宿主的 qrcode）
-│  └─ …                    garmin 数据层、配对库、快照、趋势
+│  ├─ garmin-service.mjs    数据聚合（summary/趋势/曲线/HRV/轨迹）
+│  ├─ garmin-direct.mjs     ★ 佳明直连客户端（自建，不依赖 garmin-connect 插件）
+│  └─ …                   配对库、快照、趋势等
 ├─ bin/                    命令行工具（mint-pair-code）
 ├─ assets/                 ★ 鸿蒙 App 产物（未签名 HAP）
 ├─ app/                    ★ 鸿蒙工程源码（ArkTS / DevEco）
