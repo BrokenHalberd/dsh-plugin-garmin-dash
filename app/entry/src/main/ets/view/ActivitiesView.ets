@@ -403,10 +403,6 @@ export struct ActivitiesView {
           }
         }
         .layoutWeight(1)
-        .onReachEnd(() => {
-          // 滚动到底自动加载下一页（复用已有的 loadMore，失败不清空列表）
-          this.loadMore();
-        })
         .width('100%')
         .contentEndOffset(108)
         .scrollBar(BarState.Off)
