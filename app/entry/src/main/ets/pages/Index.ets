@@ -7,14 +7,6 @@ import { ActivitiesView } from '../view/ActivitiesView';
 import { TrendView } from '../view/TrendView';
 import { MeView } from '../view/MeView';
 
-/** 底部栏项定义（仅静态信息，不含状态） */
-interface TabDef {
-  title: string;
-  icon: Resource;
-  idx: number;
-}
-
-
 /**
  * 主界面：液态玻璃选项栏 + 圆形 DSH 对话键。
  *
@@ -163,25 +155,14 @@ struct Index {
     }, HAND_HIDE_MS);
   }
 
-  /** 页签静态定义（每次调用返回新数组，供 ForEach 使用） */
-  private tabs(): TabDef[] {
-    return [
-      { title: '状态', icon: $r('sys.symbol.bolt_filled_on_circle'), idx: 0 },
-      { title: '运动', icon: $r('sys.symbol.compass_circle'), idx: 1 },
-      { title: '趋势', icon: $r('sys.symbol.rectangle_portrait_wave_2'), idx: 2 },
-      { title: '我的', icon: $r('sys.symbol.person_crop_circle_fill_1'), idx: 3 }
-    ];
-  }
-
   private switchTo(idx: number): void {
     this.currentTab = idx;
     this.controller.changeIndex(idx, true);
     this.tick = this.tick + 1;
   }
 
-  /** 单个页签（**无参数**：高亮直接读 this.currentTab，避免 @Builder 参数不刷新） */
   @Builder
-  barCell(title: string, icon: Resource, idx: number) {
+  tabItem(title: string, icon: Resource, idx: number) {
     Flex({
       direction: FlexDirection.Column,
       justifyContent: FlexAlign.Center,
@@ -209,18 +190,6 @@ struct Index {
     .animation({ duration: 320, curve: Curve.Friction })
     .onClick(() => { this.switchTo(idx); })
   }
-
-  /** 底部栏整体：用 ForEach 驱动，栏整体随 currentTab 变化重建 */
-  @Builder
-  bottomBar() {
-    Row() {
-      ForEach(this.tabs(), (t: TabDef, i: number) => {
-        this.barCell(t.title, t.icon, t.idx)
-      }, (t: TabDef) => String(t.idx))
-    }
-    .width('93%')
-  }
-
 
   /** 圆形主按钮（ClashBox 启动键形态）→ DSH 对话触发键 */
   @Builder
@@ -287,6 +256,7 @@ struct Index {
         }
         .width('100%').height('100%')
       }
+      .index(this.currentTab)
       .loop(false)
       // 趋势页(索引2)交给内层面板先滑，到头由 onSwipeOut 回调切大页（对齐 ClashBox）
       .disableSwipe(this.currentTab === 2)
@@ -320,7 +290,10 @@ struct Index {
 
       // 悬浮玻璃选项栏（全项目唯一一处真模糊，与 ClashBox 的 FloatBar 一致）
       Row() {
-        this.bottomBar()
+        this.tabItem('状态', $r('sys.symbol.bolt_filled_on_circle'), 0)
+        this.tabItem('运动', $r('sys.symbol.compass_circle'), 1)
+        this.tabItem('趋势', $r('sys.symbol.rectangle_portrait_wave_2'), 2)
+        this.tabItem('我的', $r('sys.symbol.person_crop_circle_fill_1'), 3)
       }
       .width('93%')
       .height(64)
