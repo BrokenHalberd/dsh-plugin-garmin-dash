@@ -212,6 +212,11 @@ export class ApiClient {
    * 结果序列化成同样的 JSON，因此所有视图无需任何改动。
    * 与本地版（com.atlas.garminlocal）共用同一套 GarminApi / GarminLocalSource。
    */
+  /** 公网通道不可达标记：置位后在冷却期内直接走本地直连，避免每条请求白等 20 秒超时 */
+  private static publicDown: boolean = false;
+  private static publicDownAt: number = 0;
+  private static readonly PUBLIC_RETRY_MS: number = 120000;
+
   private static async authedGet(path: string): Promise<string> {
     const cachedText = ApiClient.getCache.get(path);
     if (cachedText !== undefined) {
@@ -234,6 +239,17 @@ export class ApiClient {
       }
       throw new ApiError(401, '尚未配对，请先在「我的」里配对');
     }
+    const nowMs = Date.now();
+    if (ApiClient.publicDown && nowMs - ApiClient.publicDownAt < ApiClient.PUBLIC_RETRY_MS) {
+      const localFast = await ApiClient.tryLocal(path);
+      if (localFast !== null) {
+        ApiClient.getCache.set(path, localFast);
+        ApiClient.getCacheAt.set(path, nowMs);
+        return localFast;
+      }
+      // 本地源不覆盖该接口（如 route/dsh-link）→ 仍走网络
+      ApiClient.publicDown = false;
+    }
     const req = http.createHttp();
     try {
       const header: Record<string, string> = { 'Content-Type': 'application/json', 'X-Device-Key': key };
@@ -249,10 +265,16 @@ export class ApiClient {
       if (res.responseCode !== 200) {
         throw new ApiError(res.responseCode, ApiClient.hint(res.responseCode, text));
       }
+      ApiClient.publicDown = false;
       ApiClient.getCache.set(path, text);
       ApiClient.getCacheAt.set(path, Date.now());
       return text;
     } catch (e) {
+      // 网络类失败（超时/拒绝/5xx/中继）→ 置粘滞标记；业务 4xx 说明后端可达，不置
+      if (!(e instanceof ApiError) || (e as ApiError).code >= 500 || (e as ApiError).code === 0) {
+        ApiClient.publicDown = true;
+        ApiClient.publicDownAt = Date.now();
+      }
       // 后端不通（隧道抖动 / PC 离线 / 中继 503）→ 直连佳明
       const local = await ApiClient.tryLocal(path);
       if (local !== null) {

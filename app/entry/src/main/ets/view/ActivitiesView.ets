@@ -100,9 +100,9 @@ export struct ActivitiesView {
       .catch((e: Object) => {
         this.loading = false;
         this.refreshing = false;
-        if (!showed) {
-          this.err = ApiClient.friendly(e);
-        }
+        // 即使有缓存也要提示：否则界面一直显示"缓存 · xx 分钟前"，看不出刷新失败
+        const msg = ApiClient.friendly(e);
+        this.err = showed ? ('刷新失败，仍在显示缓存：' + msg) : msg;
       });
   }
 
