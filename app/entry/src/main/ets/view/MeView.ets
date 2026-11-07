@@ -1,4 +1,5 @@
 import { promptAction } from '@kit.ArkUI';
+import { uiMaterial } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { common } from '@kit.AbilityKit';
 import { scanBarcode, scanCore } from '@kit.ScanKit';
@@ -33,6 +34,22 @@ export struct MeView {
   @StorageLink('handFollow') handFollow: boolean = true;
   private toast(m: string): void {
     promptAction.showToast({ message: m, duration: 2500 });
+  }
+
+  /**
+   * 沉浸材质诊断文本（排障用，展示在「个人设置」卡底部）：
+   * 系统是否给本应用开启沉浸材质 + 设备是否支持，二者都满足 Dock 才会渲染真材质。
+   * 依据：官方示例 immersiveLightSense/MaterialInfo.ets 的 getMaterialInfo() 读数。
+   */
+  private materialStateText(): string {
+    try {
+      const info: uiMaterial.MaterialInfo = uiMaterial.getMaterialInfo();
+      const supported: boolean = uiMaterial.isImmersiveMaterialSupported();
+      const st: string = info.state === uiMaterial.MaterialState.ENABLE ? '已开启' : '未开启(降级)';
+      return st + ' · ' + (supported ? '支持' : '不支持') + ' · type=' + info.type;
+    } catch (e) {
+      return '读取失败';
+    }
   }
   /** 扫码配对：PC 端展示的二维码里是 https://<域名>/garmin-dash/pair?code=XXXXXXXX */
   private async scanAndPair(): Promise<void> {
@@ -251,6 +268,11 @@ export struct MeView {
       .width('100%').margin({ top: 10 })
       Text('改动立即保存并生效：功率形态的 W/kg、综合等级、车手类型都会按新体重重算。')
         .fontSize(10).fontColor($r('app.color.text_hint')).width('100%').margin({ top: 8 })
+      // —— 沉浸光感诊断（排障用）：MaterialState.ENABLE 才会真正渲染系统材质 ——
+      // 官方示例 immersiveLightSense/MaterialInfo.ets 的同一读数；DEFAULT/DISABLE 时
+      // 底部 Dock 会走自绘模糊+玻璃色的降级样式（看起来是“普通玻璃”）。
+      Text('沉浸材质：' + this.materialStateText())
+        .fontSize(10).fontColor($r('app.color.text_hint')).width('100%').margin({ top: 4 })
     }
     .padding(16).width('100%')
     .backgroundColor($r('app.color.card_background_blur'))

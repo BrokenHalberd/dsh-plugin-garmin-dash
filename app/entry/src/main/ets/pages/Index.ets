@@ -53,9 +53,15 @@ const HAND_HIDE_MS: number = 500;
  *   · pages/immersiveLightSense/GamePage.ets / ExploreHomePage.ets：
  *     材质元素的 backgroundColor 必须是 Transparent，且不要再叠自绘 blur/border/shadow，
  *     否则那些自绘层会盖住系统材质的折射/光感（看起来就只剩"纯透玻璃"）。
- * 不支持设备 = null → 不套材质，自动走 backgroundBlurStyle + 玻璃色的降级样式。
+ * 生效前置（官方示例 pages/immersiveLightSense/MaterialInfo.ets）：
+ *   只有 uiMaterial.getMaterialInfo().state === MaterialState.ENABLE 时材质才真正渲染；
+ *   DEFAULT/DISABLE 时 systemMaterial 不生效——此时必须保留自绘的模糊+玻璃色兜底，
+ *   否则界面就是“纯透明”（我们踩过这个坑）。
+ * 不支持/未开启 = null → 不套材质，自动走 backgroundBlurStyle + 玻璃色的降级样式。
  */
-const DOCK_SUPPORTED: boolean = uiMaterial.isImmersiveMaterialSupported();
+const DOCK_MATERIAL_STATE: uiMaterial.MaterialState = uiMaterial.getMaterialInfo().state;
+const DOCK_SUPPORTED: boolean = uiMaterial.isImmersiveMaterialSupported()
+  && DOCK_MATERIAL_STATE === uiMaterial.MaterialState.ENABLE;
 const DOCK_MATERIAL: uiMaterial.ImmersiveMaterial | null = DOCK_SUPPORTED
   ? new uiMaterial.ImmersiveMaterial({
       style: uiMaterial.ImmersiveStyle.ULTRA_THIN,
