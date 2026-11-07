@@ -1,5 +1,5 @@
 import { common } from '@kit.AbilityKit';
-import { router, LengthMetrics, curves, display } from '@kit.ArkUI';
+import { router, display } from '@kit.ArkUI';
 import { motion } from '@kit.MultimodalAwarenessKit';
 import { DeviceStore } from '../service/DeviceStore';
 import { StatusView } from '../view/StatusView';
@@ -7,30 +7,44 @@ import { ActivitiesView } from '../view/ActivitiesView';
 import { TrendView } from '../view/TrendView';
 import { MeView } from '../view/MeView';
 import { ApiClient } from '../service/ApiClient';
-import { FloatBar, TabDef } from '../view/FloatBar';
-// HarmonyOS 7 官方沉浸材质（API 26）：底部 Dock 用整条系统玻璃材质
-// 官方示例的导入写法是 kit 聚合入口（@kit.ArkUI 再导出 uiMaterial）
+import { TabItem, TabDef } from '../view/FloatBar';
+// HarmonyOS 7 官方沉浸材质（API 26）：底部 TabBar 悬浮样式背板材质
 import { uiMaterial } from '@kit.ArkUI';
 
 /**
- * 主界面：液态玻璃选项栏 + 圆形 DSH 对话键。
+ * 主界面：Tabs 悬浮页签（官方沉浸光感材质）+ 圆形 DSH 对话键。
  *
  * ── 沉浸光感（Light Sense）接入状态 ──────────────────────────────
- * 官方指南：developer.huawei.com → arkts-immersive-light-sense（enable / constraints 两篇），
- * 官方示例：applications_app_samples/code/DocsSample/ArkUISample/ImmersiveLightSense。
- * 已启用（DevEco 26.0.0 + SDK HarmonyOS 26.0.0 / API 26，工程 compileSdk/targetSdk 26.0.0）：
- *   ① pages/Index.ets：底部 Dock 容器统一套组件级 systemMaterial（ImmersiveMaterial：
- *      ULTRA_THIN + interactive + lightEffect{color: undefined} 默认光感）。
- *   ② view/FloatBar.ets：只做选中项的浅色内嵌高亮，不再单独套材质。
- *   ③ 降级样式（材质不可用时）：backgroundBlurStyle(Thin) + glass_fill_subtle 玻璃色。
- * 关键判定（指南 + API 参考交叉确认）：
- *   · MaterialState 三态：DEFAULT(0) / ENABLE(1) / DISABLE(2)。
- *   · DEFAULT 与 ENABLE 下均可通过 systemMaterial 主动设置组件级材质；
- *     只有 DISABLE 下主动设置不生效。因此门槛是 state !== DISABLE，
- *     **不能写成 state === ENABLE**（那会让 DEFAULT 的普通应用永远走降级样式）。
- * 已废弃路线（查证/实测后放弃）：
- *   · lightUpEffect（@since 12/18）：按「照亮程度」整体压暗组件，实测让整条胶囊变黑 ✗
- *   · effectStrategy(LIGHT_SENSING)：SDK 26 中仍只是 SymbolEffectStrategy（符号动效）✗
+ * 官方文档：developer.huawei.com → 沉浸光感（arkts-immersive-light-sense）
+ * + 沉浸光感常见问题（FAQ）+ @ohos.arkui.uiMaterial API 参考 + Tabs 文档。
+ *
+ * 【根因记录】旧方案（Swiper + Stack 里悬浮的普通 Row + systemMaterial）
+ * 代码完全符合官方指南，但真机（Mate 80 Pro / HarmonyOS 7.0.0.111 / API 26）
+ * hilog 抓到框架拒绝日志：
+ *   W C03900/com.atlas.garmindash/Ace:
+ *     Material inactive: out of scope. Use component in navigation title bar or Tabbar.
+ * 即 ArkUI 把沉浸式系统材质限定在 Navigation 标题栏 / TabBar 作用域内激活，
+ * 普通容器（Stack/Row/Column…）设置 systemMaterial 一律不生效——
+ * 表现为「API 全对、按压零反馈、无折射流光」。
+ *
+ * 【现行方案】Tabs + barFloatingStyle（API 26 官方悬浮页签入口）：
+ *   · Tabs({ barPosition: End }) + barOverlap(true) + vertical(false)
+ *     是 barFloatingStyle 生效的三前置（官方 Tabs 文档约束）；
+ *   · barFloatingStyle({ systemMaterial }) 把沉浸材质挂到真 TabBar 背板
+ *     （TabBar 作用域 ✓），胶囊悬浮形态也由系统接管（对齐 AppGallery）；
+ *   · 材质参数对齐官方示例 LightEffect.ets：ULTRA_THIN（悬浮栏推荐档）+
+ *     interactive（按压弹性形变）+ lightEffect:{color:undefined}（默认白色流光）。
+ *
+ * 【材质门槛】（指南 + API 参考交叉确认）：
+ *   MaterialState：DEFAULT(0) 下组件可主动设置材质；ENABLE(1) 全局默认开启；
+ *   DISABLE(2) 下主动设置不生效。故门槛必须是 state !== DISABLE——
+ *   写成 === ENABLE 会让未配置 ohos.arkui.UIMaterial.state 的普通应用
+ *   （返回 DEFAULT）永远走降级，这是本项目踩过的坑。
+ *
+ * 【已废弃路线】（查证/实测后放弃，勿回退）：
+ *   · Stack 悬浮 Row + systemMaterial：out of scope，见上 ✗
+ *   · lightUpEffect（@since 12/18）：按「照亮程度」整体压暗组件，实测变黑 ✗
+ *   · effectStrategy(LIGHT_SENSING)：SDK 26 中只是 SymbolEffectStrategy ✗
  * ─────────────────────────────────────────────────────────────────────
  *
  * ── 适人握持：完全照 ClashBox 的 HoldingHandleUtil 逻辑 ──────────────
@@ -47,22 +61,13 @@ const HAND_DEBOUNCE_MS: number = 1500;
 const HAND_HIDE_MS: number = 500;
 
 /**
- * 底部 Dock 的沉浸材质（HarmonyOS 7 官方 uiMaterial，API 26）。
- * 对齐官方示例 code/DocsSample/ArkUISample/ImmersiveLightSense：
- *   · pages/immersiveLightSense/LightEffect.ets：
- *       new uiMaterial.ImmersiveMaterial({ style: ULTRA_THIN, interactive: true,
- *                                        lightEffect: { color: undefined } })
- *     —— interactive=按压弹性形变；lightEffect.color=undefined 用【系统默认光感】，
- *        自定义颜色会让光感变弱/失效（我们之前传 accent 就是这个坑）。
- *   · pages/immersiveLightSense/GamePage.ets / ExploreHomePage.ets：
- *     材质生效时系统会把组件的 backgroundColor 恢复为透明、无边框，并由材质自带阴影；
- *     所以这里保留的底色/描边/投影只对「降级路径」有用，材质生效时会被系统接管。
- * 生效前置（指南 + API 参考交叉确认，官方示例 MaterialInfo.ets 只演示了 ENABLE 分支）：
- *   · MaterialState：DEFAULT(0) 下组件可主动设置材质；ENABLE(1) 全局默认开启；
- *     DISABLE(2) 下主动设置不生效。
- *   · 故门槛必须是 state !== DISABLE。写成 === ENABLE 会让未配置
- *     ohos.arkui.UIMaterial.state 的普通应用（返回 DEFAULT）永远走降级样式 —— 这是本项目的实际踩坑。
- * 不支持 / DISABLE = null → 不套材质，自动走 backgroundBlurStyle + 玻璃色的降级样式。
+ * 底部 TabBar 背板的沉浸材质（HarmonyOS 7 官方 uiMaterial，API 26）。
+ * 参数对齐官方示例 code/DocsSample/ArkUISample/ImmersiveLightSense：
+ *   · LightEffect.ets：ULTRA_THIN + interactive + lightEffect:{color:undefined}
+ *     （lightEffect 传有效对象即启用光感交互反馈，color:undefined 用默认白色流光）
+ *   · 官方推荐悬浮按钮/轻量提示用 ULTRA_THIN 或 THIN 档。
+ * 门槛：设备支持（isImmersiveMaterialSupported）且应用级配置非 DISABLE。
+ * 不满足 = null → barFloatingStyle 不传 systemMaterial，走系统默认悬浮背板。
  */
 const DOCK_MATERIAL_STATE: uiMaterial.MaterialState = uiMaterial.getMaterialInfo().state;
 const DOCK_SUPPORTED: boolean = uiMaterial.isImmersiveMaterialSupported()
@@ -75,14 +80,12 @@ const DOCK_MATERIAL: uiMaterial.ImmersiveMaterial | null = DOCK_SUPPORTED
     })
   : null;
 
-/** 底部选项栏 + 安全区：滚到底时避开遮挡 */
-const BOTTOM_BAR_PAD: number = 104;
-
 @Entry
 @Component
 struct Index {
   private context = getContext(this) as common.UIAbilityContext;
-  private controller: SwiperController = new SwiperController();
+  /** Tabs 控制器：趋势页面板滑到头时由 onSwipeOut 驱动切大页 */
+  private controller: TabsController = new TabsController();
   /** 右手时圆键需要向右平移的距离（vp） */
   private shiftX: number = 0;
   /** 上一次已生效的握持手：0 未知 / 1 左手 / 2 右手 */
@@ -208,7 +211,7 @@ struct Index {
     }, HAND_HIDE_MS);
   }
 
-  /** 页签静态定义（ClashBox 的 tabList 同款） */
+  /** 页签静态定义（标题/图标/索引；TabItem 消费，Tabs 原生处理点击切页） */
   private tabs(): TabDef[] {
     return [
       { title: '状态', icon: $r('sys.symbol.bolt_filled_on_circle'), idx: 0 },
@@ -217,13 +220,6 @@ struct Index {
       { title: '我的', icon: $r('sys.symbol.person_crop_circle_fill_1'), idx: 3 }
     ];
   }
-
-  private switchTo(idx: number): void {
-    this.currentTab = idx;
-    this.controller.changeIndex(idx, true);
-    this.tick = this.tick + 1;
-  }
-
 
   /** 圆形主按钮（ClashBox 启动键形态）→ DSH 对话触发键 */
   @Builder
@@ -249,60 +245,85 @@ struct Index {
     })
   }
 
+  /**
+   * TabBar 单页签：包一层 @Builder 以满足 tabBar(CustomBuilder) 签名。
+   * 动态高亮由 TabItem 内部 @Consume('currentTab') 自管理——直接在 @Builder
+   * 里写选中态样式会踩「切页不跟高亮」的渲染缓存坑（见 FloatBar.ets 注释）。
+   */
+  @Builder
+  tabBarBuilder(t: TabDef) {
+    TabItem({ itemDef: t })
+  }
+
   build() {
     Stack({ alignContent: Alignment.Bottom }) {
-      Swiper(this.controller) {
-        Column() {
-          StatusView({ tick: this.tick })
+      // ── 主内容区：Tabs（barOverlap 让内容延伸到 TabBar 底下，配合悬浮胶囊）──
+      Tabs({ barPosition: BarPosition.End, controller: this.controller }) {
+        TabContent() {
+          Column() {
+            StatusView({ tick: this.tick })
+          }
+          .width('100%').height('100%')
+          .padding({ top: this.topInset })
         }
-        .width('100%').height('100%')
+        .tabBar(this.tabBarBuilder(this.tabs()[0]))
 
-        Column() {
-          ActivitiesView({ tick: this.tick })
+        TabContent() {
+          Column() {
+            ActivitiesView({ tick: this.tick })
+          }
+          .width('100%').height('100%')
+          .padding({ top: this.topInset })
         }
-        .width('100%').height('100%')
+        .tabBar(this.tabBarBuilder(this.tabs()[1]))
 
-        Column() {
-          TrendView({
-            tick: this.tick,
-            onSwipeOut: (delta: number) => {
-              const t = this.currentTab + delta;
-              if (t < 0 || t > 3) {
-                return;
-              }
-              // 关键顺序：先改 currentTab，让 disableSwipe(this.currentTab === 2) 立刻解除禁用，
-              // 下一帧再 changeIndex(t, true) 才能真正带上翻页动画（禁用状态下是瞬跳）
-              this.currentTab = t;
-              this.tick = this.tick + 1;
-              setTimeout(() => {
-                try {
-                  this.controller.changeIndex(t, true);
-                } catch (eC) {
+        TabContent() {
+          Column() {
+            TrendView({
+              tick: this.tick,
+              onSwipeOut: (delta: number) => {
+                const t = this.currentTab + delta;
+                if (t < 0 || t > 3) {
+                  return;
                 }
-              }, 0);
-            }
-          })
+                // 先改 currentTab（高亮立即跟随 + 解除趋势页的滑动禁用），再驱动 Tabs。
+                // changeIndex 是控制器调用，不受 swipeable(false) 影响，
+                // 无需旧 Swiper 方案的 setTimeout(0) 补丁
+                this.currentTab = t;
+                this.tick = this.tick + 1;
+                this.controller.changeIndex(t);
+              }
+            })
+          }
+          .width('100%').height('100%')
+          .padding({ top: this.topInset })
         }
-        .width('100%').height('100%')
+        .tabBar(this.tabBarBuilder(this.tabs()[2]))
 
-        Column() {
-          MeView({ onChanged: () => { this.tick = this.tick + 1; } })
+        TabContent() {
+          Column() {
+            MeView({ onChanged: () => { this.tick = this.tick + 1; } })
+          }
+          .width('100%').height('100%')
+          .padding({ top: this.topInset })
         }
-        .width('100%').height('100%')
+        .tabBar(this.tabBarBuilder(this.tabs()[3]))
       }
-      .loop(false)
-      // 趋势页(索引2)交给内层面板先滑，到头由 onSwipeOut 回调切大页（对齐 ClashBox）
-      .disableSwipe(this.currentTab === 2)
-      // 对齐 ClashBox ProxyPage：内层 Scroll 先处理纵向，Swiper 只接横向
-      .nestedScroll(SwiperNestedScrollMode.SELF_FIRST)
-      .cachedCount(0)
-      .indicator(false)
-      .duration(280)
-      .curve(Curve.Friction)
-      .effectMode(EdgeEffect.None)
-      .itemSpace(0)
-      .onAnimationStart((startIndex: number, targetIndex: number) => {
-        this.currentTab = targetIndex;
+      // 悬浮样式三前置（官方 Tabs 文档约束）：barOverlap=true + vertical=false + barPosition=End
+      .barOverlap(true)
+      .vertical(false)
+      .barMode(BarMode.Fixed)
+      // 趋势页(索引2)交给内层面板先滑（TrendView 的 PanGesture），到头由
+      // onSwipeOut 回调切大页；其余页签由 Tabs 原生左右滑动切换
+      // （对齐旧 Swiper disableSwipe(currentTab===2) 的行为；Tabs 的对应属性是 scrollable）
+      .scrollable(this.currentTab !== 2)
+      // 官方悬浮 TabBar 样式（API 26）：胶囊形态 + 背板沉浸材质。
+      // 材质挂在 TabBar 作用域内才会被框架激活（旧 Stack+Row 方案 out of scope 的教训）
+      .barFloatingStyle({
+        // 12vp 视觉边距 + 底部安全区（窗口为全屏沉浸布局，见 EntryAbility），对齐旧 Dock 几何
+        barBottomMargin: 12 + this.bottomInset,
+        // 材质门槛见文件头：设备支持且非 DISABLE 才传，否则 undefined 走系统默认悬浮背板
+        systemMaterial: DOCK_MATERIAL === null ? undefined : DOCK_MATERIAL
       })
       .onChange((index: number) => {
         this.currentTab = index;
@@ -310,8 +331,8 @@ struct Index {
       })
       .width('100%')
       .height('100%')
-      .padding({ top: this.topInset })
 
+      // ── DSH 圆键悬浮层（智感握持换边逻辑不变）──
       Row() {
         this.dshButton()
         Blank()
@@ -323,26 +344,6 @@ struct Index {
       .animation({ duration: 180, curve: Curve.EaseOut })
       // translate 必须声明在 animation 之后：否则换边会变成"横穿屏幕"的补间
       .translate({ x: this.handLeft ? 0 : this.shiftX })
-
-      // 悬浮玻璃 Dock：对齐系统 AppGallery —— 整条套官方沉浸材质（systemMaterial），
-      // 选中项的高亮由 FloatBar 内部的浅色胶囊承担；不支持设备自动降级为
-      // backgroundBlurStyle + glass_fill_subtle 的旧玻璃样式（两条路都不改布局与交互）。
-      Row() {
-        FloatBar({ tabList: this.tabs(), swiperController: this.controller })
-      }
-      .width('93%')
-      .height(64)
-      .margin({ bottom: 12 + this.bottomInset })
-      // 降级路径用到的自绘样式（材质生效时系统会接管：backgroundColor 转透明、
-      // borderWidth 归零、材质自带阴影优先，所以这些只对不支持/DISABLE 的设备有效）
-      .backgroundBlurStyle(DOCK_MATERIAL === null ? BlurStyle.Thin : BlurStyle.NONE)
-      .backgroundColor(DOCK_MATERIAL === null ? $r('app.color.glass_fill_subtle') : Color.Transparent)
-      .borderRadius(32)
-      .border({ width: 0.5, color: $r('app.color.glass_border_highlight') })
-      .shadow({ radius: 26, color: $r('app.color.glass_shadow'), offsetY: 12, type: ShadowType.BLUR })
-      // ⚠ 顺序（官方 FAQ 要求）：systemMaterial 必须放在其它样式属性之后，
-      // 否则材质优先级异常、可能被背景/边框/阴影压制而不生效。
-      .systemMaterial(DOCK_MATERIAL === null ? undefined : DOCK_MATERIAL)
     }
     .width('100%')
     .height('100%')
