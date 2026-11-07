@@ -12,14 +12,14 @@ import { FloatBar, TabDef } from '../view/FloatBar';
 /**
  * 主界面：液态玻璃选项栏 + 圆形 DSH 对话键。
  *
- * ── 沉浸光感（Light Sense）接入点说明 ──────────────────────────────
+ * ── 沉浸光感（Light Sense）接入状态 ──────────────────────────────
  * 官方指南：developer.huawei.com → arkts-immersive-light-sense（含 enable / constraints 两篇）。
- * 已完成：FloatBar 胶囊用 backgroundBlurStyle(BlurStyle.Thin) 实现真实毛玻璃材质（见 view/FloatBar.ets）。
- * 待升级：本 SDK 尚无通用光感开关 effectStrategy(EffectStrategy.LIGHT_SENSING)
- *        （@since 14，仅 HarmonyOS 6.x+ SDK 提供；当前 SDK 只有 SubHeader 的 SymbolEffectStrategy）。
- *        升级 SDK 后，在下方根组件上追加：
- *          .effectStrategy(EffectStrategy.LIGHT_SENSING)
- *        并先用 canIUse 判断系统能力，不支持则维持现有静态玻璃观感（官方降级策略）。
+ * 已启用（本 SDK = HarmonyOS 6.1.1 / API 24，工程 compileSdk 已升 6.0.0(20)）：
+ *   ① backgroundBlurStyle(BlurStyle.Thin) 真实毛玻璃（view/FloatBar.ets）；
+ *   ② lightUpEffect(0.6/0.25) 光感照亮（@since 12/18，6.x SDK 的通用光感接口）。
+ * 待 7.x SDK：官方升级版环境光感 effectStrategy(EffectStrategy.LIGHT_SENSING)
+ *             （@since 14 的 7.x 接口，当前 6.1.1 SDK 无此声明）。升级 SDK 后按
+ *             canIUse 判断启用，不支持机型维持现有静态玻璃观感（官方降级策略）。
  * 功耗注意：官方约束文档要求光感仅在常驻浮层/卡片开启，避免全页面常开。
  * ─────────────────────────────────────────────────────────────────────
  *
