@@ -37,15 +37,25 @@ export struct MeView {
   }
 
   /**
-   * 沉浸材质诊断文本（排障用，展示在「个人设置」卡底部）：
-   * 系统是否给本应用开启沉浸材质 + 设备是否支持，二者都满足 Dock 才会渲染真材质。
-   * 依据：官方示例 immersiveLightSense/MaterialInfo.ets 的 getMaterialInfo() 读数。
+   * 沉浸材质诊断文本（排障用，展示在「个人设置」卡底部）。
+   * 三态语义（官方 API 参考）：
+   *   DEFAULT(0) —— 组件级 systemMaterial 可主动生效（未配置 metadata 的普通应用就是这一档）
+   *   ENABLE(1)  —— 全局默认开启
+   *   DISABLE(2) —— 全局禁用，组件级设置不生效（此时 Dock 才走降级样式）
+   * 注意：不要把 DEFAULT 说成「未开启」，那会误导排障。
    */
   private materialStateText(): string {
     try {
       const info: uiMaterial.MaterialInfo = uiMaterial.getMaterialInfo();
       const supported: boolean = uiMaterial.isImmersiveMaterialSupported();
-      const st: string = info.state === uiMaterial.MaterialState.ENABLE ? '已开启' : '未开启(降级)';
+      let st: string = '未知';
+      if (info.state === uiMaterial.MaterialState.ENABLE) {
+        st = '全局已开启';
+      } else if (info.state === uiMaterial.MaterialState.DEFAULT) {
+        st = '默认(组件级可用)';
+      } else if (info.state === uiMaterial.MaterialState.DISABLE) {
+        st = '已禁用(降级)';
+      }
       return st + ' · ' + (supported ? '支持' : '不支持') + ' · type=' + info.type;
     } catch (e) {
       return '读取失败';

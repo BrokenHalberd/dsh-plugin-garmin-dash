@@ -16,17 +16,21 @@ import { uiMaterial } from '@kit.ArkUI';
  * 主界面：液态玻璃选项栏 + 圆形 DSH 对话键。
  *
  * ── 沉浸光感（Light Sense）接入状态 ──────────────────────────────
- * 官方指南：developer.huawei.com → arkts-immersive-light-sense（含 enable / constraints 两篇）。
- * 已启用（DevEco 26.0.0 + SDK HarmonyOS 26.0.0 / API 26，工程 compileSdk 26.0.0(26)）：
- *   ① view/FloatBar.ets：@ohos.arkui.uiMaterial 的 ImmersiveMaterial + 组件级 systemMaterial
- *      （选中胶囊：ImmersiveStyle.THIN + materialColor + lightEffect 光感着色 + interactive），
- *      用 uiMaterial.isImmersiveMaterialSupported() 做运行时能力判断，不支持则降级。
- *   ② 降级样式：backgroundBlurStyle(BlurStyle.Thin) + glass_fill_strong 半透明玻璃色。
+ * 官方指南：developer.huawei.com → arkts-immersive-light-sense（enable / constraints 两篇），
+ * 官方示例：applications_app_samples/code/DocsSample/ArkUISample/ImmersiveLightSense。
+ * 已启用（DevEco 26.0.0 + SDK HarmonyOS 26.0.0 / API 26，工程 compileSdk/targetSdk 26.0.0）：
+ *   ① pages/Index.ets：底部 Dock 容器统一套组件级 systemMaterial（ImmersiveMaterial：
+ *      ULTRA_THIN + interactive + lightEffect{color: undefined} 默认光感）。
+ *   ② view/FloatBar.ets：只做选中项的浅色内嵌高亮，不再单独套材质。
+ *   ③ 降级样式（材质不可用时）：backgroundBlurStyle(Thin) + glass_fill_subtle 玻璃色。
+ * 关键判定（指南 + API 参考交叉确认）：
+ *   · MaterialState 三态：DEFAULT(0) / ENABLE(1) / DISABLE(2)。
+ *   · DEFAULT 与 ENABLE 下均可通过 systemMaterial 主动设置组件级材质；
+ *     只有 DISABLE 下主动设置不生效。因此门槛是 state !== DISABLE，
+ *     **不能写成 state === ENABLE**（那会让 DEFAULT 的普通应用永远走降级样式）。
  * 已废弃路线（查证/实测后放弃）：
  *   · lightUpEffect（@since 12/18）：按「照亮程度」整体压暗组件，实测让整条胶囊变黑 ✗
- *   · effectStrategy(LIGHT_SENSING)：SDK 26 中仍只是 SymbolEffectStrategy（符号动效），
- *     真正的 7.x 沉浸材质入口是上面的 @ohos.arkui.uiMaterial ✗
- * 功耗注意：官方约束文档要求光感仅在常驻浮层/卡片开启，避免全页面常开。
+ *   · effectStrategy(LIGHT_SENSING)：SDK 26 中仍只是 SymbolEffectStrategy（符号动效）✗
  * ─────────────────────────────────────────────────────────────────────
  *
  * ── 适人握持：完全照 ClashBox 的 HoldingHandleUtil 逻辑 ──────────────
@@ -51,17 +55,18 @@ const HAND_HIDE_MS: number = 500;
  *     —— interactive=按压弹性形变；lightEffect.color=undefined 用【系统默认光感】，
  *        自定义颜色会让光感变弱/失效（我们之前传 accent 就是这个坑）。
  *   · pages/immersiveLightSense/GamePage.ets / ExploreHomePage.ets：
- *     材质元素的 backgroundColor 必须是 Transparent，且不要再叠自绘 blur/border/shadow，
- *     否则那些自绘层会盖住系统材质的折射/光感（看起来就只剩"纯透玻璃"）。
- * 生效前置（官方示例 pages/immersiveLightSense/MaterialInfo.ets）：
- *   只有 uiMaterial.getMaterialInfo().state === MaterialState.ENABLE 时材质才真正渲染；
- *   DEFAULT/DISABLE 时 systemMaterial 不生效——此时必须保留自绘的模糊+玻璃色兜底，
- *   否则界面就是“纯透明”（我们踩过这个坑）。
- * 不支持/未开启 = null → 不套材质，自动走 backgroundBlurStyle + 玻璃色的降级样式。
+ *     材质生效时系统会把组件的 backgroundColor 恢复为透明、无边框，并由材质自带阴影；
+ *     所以这里保留的底色/描边/投影只对「降级路径」有用，材质生效时会被系统接管。
+ * 生效前置（指南 + API 参考交叉确认，官方示例 MaterialInfo.ets 只演示了 ENABLE 分支）：
+ *   · MaterialState：DEFAULT(0) 下组件可主动设置材质；ENABLE(1) 全局默认开启；
+ *     DISABLE(2) 下主动设置不生效。
+ *   · 故门槛必须是 state !== DISABLE。写成 === ENABLE 会让未配置
+ *     ohos.arkui.UIMaterial.state 的普通应用（返回 DEFAULT）永远走降级样式 —— 这是本项目的实际踩坑。
+ * 不支持 / DISABLE = null → 不套材质，自动走 backgroundBlurStyle + 玻璃色的降级样式。
  */
 const DOCK_MATERIAL_STATE: uiMaterial.MaterialState = uiMaterial.getMaterialInfo().state;
 const DOCK_SUPPORTED: boolean = uiMaterial.isImmersiveMaterialSupported()
-  && DOCK_MATERIAL_STATE === uiMaterial.MaterialState.ENABLE;
+  && DOCK_MATERIAL_STATE !== uiMaterial.MaterialState.DISABLE;
 const DOCK_MATERIAL: uiMaterial.ImmersiveMaterial | null = DOCK_SUPPORTED
   ? new uiMaterial.ImmersiveMaterial({
       style: uiMaterial.ImmersiveStyle.ULTRA_THIN,
@@ -328,15 +333,16 @@ struct Index {
       .width('93%')
       .height(64)
       .margin({ bottom: 12 + this.bottomInset })
-      .systemMaterial(DOCK_MATERIAL === null ? undefined : DOCK_MATERIAL)
-      // 系统材质生效时：底色与自绘模糊让位（盖住会削弱材质折射/光感）；
-      // 但【描边 + 投影要保留】——实测去掉后玻璃条在深色背景上没有边界、与页面糊在一起，
-      // 与 AppGallery 的 Dock 形态不符。描边/投影只勾勒轮廓，不影响材质内部的折射。
+      // 降级路径用到的自绘样式（材质生效时系统会接管：backgroundColor 转透明、
+      // borderWidth 归零、材质自带阴影优先，所以这些只对不支持/DISABLE 的设备有效）
       .backgroundBlurStyle(DOCK_MATERIAL === null ? BlurStyle.Thin : BlurStyle.NONE)
       .backgroundColor(DOCK_MATERIAL === null ? $r('app.color.glass_fill_subtle') : Color.Transparent)
       .borderRadius(32)
       .border({ width: 0.5, color: $r('app.color.glass_border_highlight') })
       .shadow({ radius: 26, color: $r('app.color.glass_shadow'), offsetY: 12, type: ShadowType.BLUR })
+      // ⚠ 顺序（官方 FAQ 要求）：systemMaterial 必须放在其它样式属性之后，
+      // 否则材质优先级异常、可能被背景/边框/阴影压制而不生效。
+      .systemMaterial(DOCK_MATERIAL === null ? undefined : DOCK_MATERIAL)
     }
     .width('100%')
     .height('100%')
