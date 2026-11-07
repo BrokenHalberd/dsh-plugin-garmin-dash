@@ -7,13 +7,8 @@
  * 高亮状态用 @Provide/@Consume 跨组件传递——子组件在 @Consume 变化时可靠重渲染。
  */
 import { LengthMetrics } from '@kit.ArkUI';
-// HarmonyOS 7（API 26）官方「沉浸光感/沉浸材质」模块：@ohos.arkui.uiMaterial
-// 官方文档：developer.huawei.com → arkts-immersive-light-sense（enable / constraints）
-// 能力：ImmersiveMaterial（玻璃厚度/材质色/倒色/阴影/交互态/光感颜色）+ 组件级 systemMaterial
-import uiMaterial from '@ohos.arkui.uiMaterial';
-
-/** 设备是否支持沉浸系统材质（官方运行时判断，等价于指南里的能力判断；不支持则走旧样式降级） */
-const IMMERSIVE_SUPPORTED: boolean = uiMaterial.isImmersiveMaterialSupported();
+// 说明：沉浸材质（uiMaterial/systemMaterial）统一由外层 pages/Index.ets 的 Dock 容器承载，
+// 本组件只负责四个选项胶囊与选中高亮，不再单独套材质。
 
 export interface TabDef {
   title: string;

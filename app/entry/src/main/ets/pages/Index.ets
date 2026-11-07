@@ -9,7 +9,8 @@ import { MeView } from '../view/MeView';
 import { ApiClient } from '../service/ApiClient';
 import { FloatBar, TabDef } from '../view/FloatBar';
 // HarmonyOS 7 官方沉浸材质（API 26）：底部 Dock 用整条系统玻璃材质
-import uiMaterial from '@ohos.arkui.uiMaterial';
+// 官方示例的导入写法是 kit 聚合入口（@kit.ArkUI 再导出 uiMaterial）
+import { uiMaterial } from '@kit.ArkUI';
 
 /**
  * 主界面：液态玻璃选项栏 + 圆形 DSH 对话键。
@@ -42,22 +43,24 @@ const HAND_DEBOUNCE_MS: number = 1500;
 const HAND_HIDE_MS: number = 500;
 
 /**
- * 底部 Dock 的沉浸材质（HarmonyOS 7 官方 @ohos.arkui.uiMaterial，API 26）。
- * 对齐系统 AppGallery 的 Dock：整条是一个玻璃胶囊，选中项只是内部浅色高亮。
- * · style: REGULAR —— 玻璃厚度档；materialColor 不传 = 用系统默认玻璃色（比自定深色更亮）
- * · applyShadow: true 让材质自带柔和投影
- * · lightEffect.color: 光感着色（官方「沉浸光感」）
- * · interactive: false（整条是容器，按下反馈由内部胶囊负责）
- * 不支持设备 = null → 组件不套材质，自动走 backgroundBlurStyle + 玻璃色的降级样式。
+ * 底部 Dock 的沉浸材质（HarmonyOS 7 官方 uiMaterial，API 26）。
+ * 对齐官方示例 code/DocsSample/ArkUISample/ImmersiveLightSense：
+ *   · pages/immersiveLightSense/LightEffect.ets：
+ *       new uiMaterial.ImmersiveMaterial({ style: ULTRA_THIN, interactive: true,
+ *                                        lightEffect: { color: undefined } })
+ *     —— interactive=按压弹性形变；lightEffect.color=undefined 用【系统默认光感】，
+ *        自定义颜色会让光感变弱/失效（我们之前传 accent 就是这个坑）。
+ *   · pages/immersiveLightSense/GamePage.ets / ExploreHomePage.ets：
+ *     材质元素的 backgroundColor 必须是 Transparent，且不要再叠自绘 blur/border/shadow，
+ *     否则那些自绘层会盖住系统材质的折射/光感（看起来就只剩"纯透玻璃"）。
+ * 不支持设备 = null → 不套材质，自动走 backgroundBlurStyle + 玻璃色的降级样式。
  */
 const DOCK_SUPPORTED: boolean = uiMaterial.isImmersiveMaterialSupported();
 const DOCK_MATERIAL: uiMaterial.ImmersiveMaterial | null = DOCK_SUPPORTED
   ? new uiMaterial.ImmersiveMaterial({
-      style: uiMaterial.ImmersiveStyle.REGULAR,
-      colorInvert: false,
-      applyShadow: true,
-      interactive: false,
-      lightEffect: { color: $r('app.color.accent') }
+      style: uiMaterial.ImmersiveStyle.ULTRA_THIN,
+      interactive: true,
+      lightEffect: { color: undefined }
     })
   : null;
 
@@ -320,11 +323,15 @@ struct Index {
       .height(64)
       .margin({ bottom: 12 + this.bottomInset })
       .systemMaterial(DOCK_MATERIAL === null ? undefined : DOCK_MATERIAL)
-      .backgroundBlurStyle(BlurStyle.Thin)
-      .backgroundColor($r('app.color.glass_fill_subtle'))
+      // 系统材质生效时，自绘的 blur/底色/边框/投影必须让位（官方示例就是这么写的）：
+      // 叠在上面会盖住材质的折射与光感，看起来只剩"纯透玻璃"。不支持设备时才用旧样式。
+      .backgroundBlurStyle(DOCK_MATERIAL === null ? BlurStyle.Thin : BlurStyle.NONE)
+      .backgroundColor(DOCK_MATERIAL === null ? $r('app.color.glass_fill_subtle') : Color.Transparent)
       .borderRadius(32)
-      .border({ width: 0.5, color: $r('app.color.glass_border_highlight') })
-      .shadow({ radius: 26, color: $r('app.color.glass_shadow'), offsetY: 12, type: ShadowType.BLUR })
+      .border({ width: DOCK_MATERIAL === null ? 0.5 : 0, color: $r('app.color.glass_border_highlight') })
+      .shadow(DOCK_MATERIAL === null
+        ? { radius: 26, color: $r('app.color.glass_shadow'), offsetY: 12, type: ShadowType.BLUR }
+        : { radius: 0, color: Color.Transparent, offsetY: 0 })
     }
     .width('100%')
     .height('100%')
