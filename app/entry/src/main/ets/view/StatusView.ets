@@ -437,7 +437,11 @@ export struct StatusView {
 
   private hrvText(): string {
     const h = this.hrv;
-    return h === null || h.lastNightAvg === null ? '--' : '' + h.lastNightAvg;
+    // 对齐佳明：状态大数字 = 7 天均值（昨夜值仅作参考小字）
+    if (h === null || h.weeklyAvg === null) {
+      return h === null || h.lastNightAvg === null ? '--' : '' + h.lastNightAvg;
+    }
+    return '' + h.weeklyAvg;
   }
 
   private hrvStatusText(): string {
@@ -564,10 +568,19 @@ export struct StatusView {
   /** HRV 条：平衡区宽度（balancedLow → balancedUpper ✓） */
   private hrvWMid(): number {
     const h = this.hrv;
-    if (h === null || h.baselineLow === null || h.baselineBalancedUpper === null) {
+    if (h === null || h.baselineBalancedLow === null || h.baselineBalancedUpper === null) {
       return 1;
     }
-    return Math.max(1, h.baselineBalancedUpper - h.baselineLow);
+    return Math.max(1, h.baselineBalancedUpper - h.baselineBalancedLow);
+  }
+
+  /** HRV 条：偏离区宽度（baselineLow → balancedLow，佳明的 Unbalanced 档） */
+  private hrvWUnb(): number {
+    const h = this.hrv;
+    if (h === null || h.baselineLow === null || h.baselineBalancedLow === null) {
+      return 1;
+    }
+    return Math.max(1, h.baselineBalancedLow - h.baselineLow);
   }
 
   /** HRV 条：高区宽度（固定尾巴 20ms ✓） */
@@ -578,14 +591,18 @@ export struct StatusView {
   /** HRV 当前值在整条上的位置（0~100%）✓ */
   private hrvMarkerPct(): number {
     const h = this.hrv;
-    if (h === null || h.lastNightAvg === null || h.baselineBalancedUpper === null) {
+    if (h === null) {
+      return -1;
+    }
+    const v = h.weeklyAvg === null ? h.lastNightAvg : h.weeklyAvg;
+    if (v === null || h.baselineBalancedUpper === null) {
       return -1;
     }
     const total = h.baselineBalancedUpper + 20;
     if (total <= 0) {
       return -1;
     }
-    let pct = (h.lastNightAvg / total) * 100;
+    let pct = (v / total) * 100;
     if (pct < 2) {
       pct = 2;
     }
@@ -601,7 +618,8 @@ export struct StatusView {
     if (h === null || h.baselineLow === null || h.baselineBalancedUpper === null) {
       return '—';
     }
-    return '低于 ' + h.baselineLow + ' / ' + h.baselineLow + '–' + h.baselineBalancedUpper + ' / 高于 ' + h.baselineBalancedUpper + ' ms';
+    const b1 = h.baselineBalancedLow;
+    return '低于 ' + h.baselineLow + ' / ' + h.baselineLow + '–' + b1 + ' 偏离 / ' + b1 + '–' + h.baselineBalancedUpper + ' 平衡 / 高于 ' + h.baselineBalancedUpper + ' ms';
   }
 
   @Builder
@@ -611,7 +629,7 @@ export struct StatusView {
         Column() {
           Row() {
 
-            Text('HRV（昨夜）').fontSize(11).fontColor($r('app.color.text_tertiary'))
+            Text('HRV 状态（7 天）').fontSize(11).fontColor($r('app.color.text_tertiary'))
 
             Blank()
 
@@ -629,6 +647,7 @@ export struct StatusView {
         Column() {
           Text(this.hrvStatusText()).fontSize(14).fontWeight(FontWeight.Bold).fontColor(this.hrvColor())
           Text('7 天均值 ' + this.hrvWeeklyText()).fontSize(10).fontColor(COLOR_TERTIARY)
+          Text('昨夜 ' + this.hrvLastNightText()).fontSize(10).fontColor(COLOR_TERTIARY)
             .margin({ top: 3 })
         }
         .alignItems(HorizontalAlign.End)
@@ -638,6 +657,7 @@ export struct StatusView {
       Stack({ alignContent: Alignment.Start }) {
         Row() {
           Row().layoutWeight(this.hrvWLow()).height('100%').backgroundColor(COLOR_DANGER)
+          Row().layoutWeight(this.hrvWUnb()).height('100%').backgroundColor(COLOR_WARN)
           Row().layoutWeight(this.hrvWMid()).height('100%').backgroundColor(COLOR_ACCENT)
           Row().layoutWeight(this.hrvWHigh()).height('100%').backgroundColor(COLOR_WARN)
         }
@@ -654,7 +674,7 @@ export struct StatusView {
       Row() {
         Text(this.hrvRangeText()).fontSize(9).fontColor(COLOR_HINT)
         Blank()
-        Text('白线=昨夜值').fontSize(9).fontColor(COLOR_HINT)
+        Text('白线=7天均值').fontSize(9).fontColor(COLOR_HINT)
       }
       .width('100%').margin({ top: 4 })
 
@@ -666,6 +686,11 @@ export struct StatusView {
     .backgroundColor(COLOR_CARD_BG)
     .border({ width: 1, color: COLOR_CARD_BORDER })
     .borderRadius(14)
+  }
+
+  private hrvLastNightText(): string {
+    const h = this.hrv;
+    return h === null || h.lastNightAvg === null ? '--' : '' + h.lastNightAvg;
   }
 
   private hrvWeeklyText(): string {

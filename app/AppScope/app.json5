@@ -2,8 +2,8 @@
   "app": {
     "bundleName": "com.atlas.garmindash",
     "vendor": "atlas",
-    "versionCode": 1000203,
-    "versionName": "4.6.35",
+    "versionCode": 1000204,
+    "versionName": "4.6.36",
     "icon": "$media:layered_image",
     "label": "$string:app_name"
   }
