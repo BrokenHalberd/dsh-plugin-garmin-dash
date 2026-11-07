@@ -55,12 +55,10 @@ export struct FloatBar {
         // 兼容性：不支持的机型由系统自动降级（表现为无模糊的普通半透明背景，即旧观感）。
         // 顺序要求：backgroundBlurStyle 必须在 backgroundColor 之前，玻璃色才叠在模糊层之上。
         .backgroundBlurStyle(BlurStyle.Thin)
-        // ── 光感照亮（lightUpEffect）──────────────────────────────────────────
-        // HarmonyOS 6.x 官方光感家族接口（@since 12 基础版，@since 18 起支持 0~1 的程度值；
-        // 工程 compileSdk 已升 6.0.0(20)，本 SDK 6.1.1 可用）。degree：0=暗、1=完全照亮，
-        // 默认 1（未传时）。这里激活项给 0.6、非激活 0.25：让高亮胶囊有轻微「被光照亮」的
-        // 玻璃观感，且不改变布局与点击/切换逻辑。想调强弱只改这两个数字即可。
-        .lightUpEffect(this.currentTab === t.idx ? 0.6 : 0.25)
+        // 注意：不要把 lightUpEffect 叠加在这里。它按「照亮程度」整体渲染组件，
+        // 0<value<1 会把胶囊连同图标文字一起压暗（实测 0.25/0.6 整条变黑），
+        // 与玻璃观感相反。官方 6.x 的 lightUpEffect 适合图片/媒体内容；
+        // 浮层玻璃的光感留给 7.x 的 effectStrategy(LIGHT_SENSING)（见 Index.ets 注释）。
         .backgroundColor(this.currentTab === t.idx ? $r('app.color.glass_fill_strong') : Color.Transparent)
         .animation({ duration: 320, curve: Curve.Friction })
         .onClick(() => {
