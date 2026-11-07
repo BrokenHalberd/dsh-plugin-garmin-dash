@@ -14,12 +14,15 @@ import { FloatBar, TabDef } from '../view/FloatBar';
  *
  * ── 沉浸光感（Light Sense）接入状态 ──────────────────────────────
  * 官方指南：developer.huawei.com → arkts-immersive-light-sense（含 enable / constraints 两篇）。
- * 已启用（本 SDK = HarmonyOS 6.1.1 / API 24，工程 compileSdk 6.0.0(20)）：
- *   ① backgroundBlurStyle(BlurStyle.Thin) 真实毛玻璃（view/FloatBar.ets）。
- *   ② 曾试 lightUpEffect（@since 12/18）——实测会把整条胶囊压暗变黑 ✗ 已撤回：
- *      该接口按「照亮程度」整体渲染组件（0=暗/1=全亮），适合图片媒体，不适合浮层玻璃。
- * 待 7.x SDK：官方环境光感 effectStrategy(EffectStrategy.LIGHT_SENSING)（@since 14 的 7.x 接口，
- *             当前 6.1.1 SDK 无此声明）。升级后按 canIUse 判断启用，不支持机型维持现状。
+ * 已启用（DevEco 26.0.0 + SDK HarmonyOS 26.0.0 / API 26，工程 compileSdk 26.0.0(26)）：
+ *   ① view/FloatBar.ets：@ohos.arkui.uiMaterial 的 ImmersiveMaterial + 组件级 systemMaterial
+ *      （选中胶囊：ImmersiveStyle.THIN + materialColor + lightEffect 光感着色 + interactive），
+ *      用 uiMaterial.isImmersiveMaterialSupported() 做运行时能力判断，不支持则降级。
+ *   ② 降级样式：backgroundBlurStyle(BlurStyle.Thin) + glass_fill_strong 半透明玻璃色。
+ * 已废弃路线（查证/实测后放弃）：
+ *   · lightUpEffect（@since 12/18）：按「照亮程度」整体压暗组件，实测让整条胶囊变黑 ✗
+ *   · effectStrategy(LIGHT_SENSING)：SDK 26 中仍只是 SymbolEffectStrategy（符号动效），
+ *     真正的 7.x 沉浸材质入口是上面的 @ohos.arkui.uiMaterial ✗
  * 功耗注意：官方约束文档要求光感仅在常驻浮层/卡片开启，避免全页面常开。
  * ─────────────────────────────────────────────────────────────────────
  *
