@@ -46,6 +46,15 @@ export struct FloatBar {
         .height(52)
         .margin({ left: 4, right: 4, top: 6, bottom: 6 })
         .borderRadius(100)
+        // ── 沉浸光感 · 真实毛玻璃材质 ──────────────────────────────────────────
+        // 依据华为官方「沉浸光感」指南（developer.huawei.com → arkts-immersive-light-sense）
+        // 的材质接口 backgroundBlurStyle（@since 11，本 SDK 已带，编译期可用）。
+        // 作用：对胶囊下方透出的页面内容做真实高斯模糊，叠加 glass_fill_strong 半透明色后
+        // 呈现真玻璃质感；此前仅靠半透明色模拟（无模糊）。
+        // 影响面：纯视觉属性——不改布局尺寸、不改点击/切换/高亮逻辑，不消费任何事件。
+        // 兼容性：不支持的机型由系统自动降级（表现为无模糊的普通半透明背景，即旧观感）。
+        // 顺序要求：backgroundBlurStyle 必须在 backgroundColor 之前，玻璃色才叠在模糊层之上。
+        .backgroundBlurStyle(BlurStyle.Thin)
         .backgroundColor(this.currentTab === t.idx ? $r('app.color.glass_fill_strong') : Color.Transparent)
         .animation({ duration: 320, curve: Curve.Friction })
         .onClick(() => {

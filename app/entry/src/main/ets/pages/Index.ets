@@ -12,6 +12,17 @@ import { FloatBar, TabDef } from '../view/FloatBar';
 /**
  * 主界面：液态玻璃选项栏 + 圆形 DSH 对话键。
  *
+ * ── 沉浸光感（Light Sense）接入点说明 ──────────────────────────────
+ * 官方指南：developer.huawei.com → arkts-immersive-light-sense（含 enable / constraints 两篇）。
+ * 已完成：FloatBar 胶囊用 backgroundBlurStyle(BlurStyle.Thin) 实现真实毛玻璃材质（见 view/FloatBar.ets）。
+ * 待升级：本 SDK 尚无通用光感开关 effectStrategy(EffectStrategy.LIGHT_SENSING)
+ *        （@since 14，仅 HarmonyOS 6.x+ SDK 提供；当前 SDK 只有 SubHeader 的 SymbolEffectStrategy）。
+ *        升级 SDK 后，在下方根组件上追加：
+ *          .effectStrategy(EffectStrategy.LIGHT_SENSING)
+ *        并先用 canIUse 判断系统能力，不支持则维持现有静态玻璃观感（官方降级策略）。
+ * 功耗注意：官方约束文档要求光感仅在常驻浮层/卡片开启，避免全页面常开。
+ * ─────────────────────────────────────────────────────────────────────
+ *
  * ── 适人握持：完全照 ClashBox 的 HoldingHandleUtil 逻辑 ──────────────
  * 1) **只订阅 `holdingHandChanged`（握持手）**，绝不同时轮询"操作手"——
  *    两个信号会互相打架，按钮会来回跳（之前"不稳定"的真正原因）。
