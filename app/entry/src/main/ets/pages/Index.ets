@@ -8,6 +8,8 @@ import { TrendView } from '../view/TrendView';
 import { MeView } from '../view/MeView';
 import { ApiClient } from '../service/ApiClient';
 import { FloatBar, TabDef } from '../view/FloatBar';
+// HarmonyOS 7 官方沉浸材质（API 26）：底部 Dock 用整条系统玻璃材质
+import uiMaterial from '@ohos.arkui.uiMaterial';
 
 /**
  * 主界面：液态玻璃选项栏 + 圆形 DSH 对话键。
@@ -38,6 +40,26 @@ import { FloatBar, TabDef } from '../view/FloatBar';
  */
 const HAND_DEBOUNCE_MS: number = 1500;
 const HAND_HIDE_MS: number = 500;
+
+/**
+ * 底部 Dock 的沉浸材质（HarmonyOS 7 官方 @ohos.arkui.uiMaterial，API 26）。
+ * 对齐系统 AppGallery 的 Dock：整条是一个玻璃胶囊，选中项只是内部浅色高亮。
+ * · style: REGULAR —— 玻璃厚度档；materialColor 不传 = 用系统默认玻璃色（比自定深色更亮）
+ * · applyShadow: true 让材质自带柔和投影
+ * · lightEffect.color: 光感着色（官方「沉浸光感」）
+ * · interactive: false（整条是容器，按下反馈由内部胶囊负责）
+ * 不支持设备 = null → 组件不套材质，自动走 backgroundBlurStyle + 玻璃色的降级样式。
+ */
+const DOCK_SUPPORTED: boolean = uiMaterial.isImmersiveMaterialSupported();
+const DOCK_MATERIAL: uiMaterial.ImmersiveMaterial | null = DOCK_SUPPORTED
+  ? new uiMaterial.ImmersiveMaterial({
+      style: uiMaterial.ImmersiveStyle.REGULAR,
+      colorInvert: false,
+      applyShadow: true,
+      interactive: false,
+      lightEffect: { color: $r('app.color.accent') }
+    })
+  : null;
 
 /** 底部选项栏 + 安全区：滚到底时避开遮挡 */
 const BOTTOM_BAR_PAD: number = 104;
@@ -288,13 +310,16 @@ struct Index {
       // translate 必须声明在 animation 之后：否则换边会变成"横穿屏幕"的补间
       .translate({ x: this.handLeft ? 0 : this.shiftX })
 
-      // 悬浮玻璃选项栏（全项目唯一一处真模糊，与 ClashBox 的 FloatBar 一致）
+      // 悬浮玻璃 Dock：对齐系统 AppGallery —— 整条套官方沉浸材质（systemMaterial），
+      // 选中项的高亮由 FloatBar 内部的浅色胶囊承担；不支持设备自动降级为
+      // backgroundBlurStyle + glass_fill_subtle 的旧玻璃样式（两条路都不改布局与交互）。
       Row() {
         FloatBar({ tabList: this.tabs(), swiperController: this.controller })
       }
       .width('93%')
       .height(64)
       .margin({ bottom: 12 + this.bottomInset })
+      .systemMaterial(DOCK_MATERIAL === null ? undefined : DOCK_MATERIAL)
       .backgroundBlurStyle(BlurStyle.Thin)
       .backgroundColor($r('app.color.glass_fill_subtle'))
       .borderRadius(32)
