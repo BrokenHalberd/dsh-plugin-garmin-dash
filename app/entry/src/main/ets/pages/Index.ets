@@ -323,15 +323,14 @@ struct Index {
       .height(64)
       .margin({ bottom: 12 + this.bottomInset })
       .systemMaterial(DOCK_MATERIAL === null ? undefined : DOCK_MATERIAL)
-      // 系统材质生效时，自绘的 blur/底色/边框/投影必须让位（官方示例就是这么写的）：
-      // 叠在上面会盖住材质的折射与光感，看起来只剩"纯透玻璃"。不支持设备时才用旧样式。
+      // 系统材质生效时：底色与自绘模糊让位（盖住会削弱材质折射/光感）；
+      // 但【描边 + 投影要保留】——实测去掉后玻璃条在深色背景上没有边界、与页面糊在一起，
+      // 与 AppGallery 的 Dock 形态不符。描边/投影只勾勒轮廓，不影响材质内部的折射。
       .backgroundBlurStyle(DOCK_MATERIAL === null ? BlurStyle.Thin : BlurStyle.NONE)
       .backgroundColor(DOCK_MATERIAL === null ? $r('app.color.glass_fill_subtle') : Color.Transparent)
       .borderRadius(32)
-      .border({ width: DOCK_MATERIAL === null ? 0.5 : 0, color: $r('app.color.glass_border_highlight') })
-      .shadow(DOCK_MATERIAL === null
-        ? { radius: 26, color: $r('app.color.glass_shadow'), offsetY: 12, type: ShadowType.BLUR }
-        : { radius: 0, color: Color.Transparent, offsetY: 0 })
+      .border({ width: 0.5, color: $r('app.color.glass_border_highlight') })
+      .shadow({ radius: 26, color: $r('app.color.glass_shadow'), offsetY: 12, type: ShadowType.BLUR })
     }
     .width('100%')
     .height('100%')
